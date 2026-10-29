@@ -90,6 +90,12 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
           targets: ${{ matrix.job.target }}
 
+      # NOTE: Do not coerce use-cross with `|| false`. Composite actions receive
+      # inputs as strings; the string "false" is truthy, so
+      # philss/rustler-precompiled-action would still run giantswarm/install-binary
+      # (cross). That step uses GNU-tar `--wildcards`, which fails on macOS/Windows
+      # (`tar: Option --wildcards is not supported`). Leave the input empty when
+      # cross is not needed (same pattern as elixir-nx/explorer).
       - name: Build precompiled NIF
         id: build-crate
         uses: philss/rustler-precompiled-action@v1.1.5
@@ -98,7 +104,8 @@ jobs:
           project-version: ${{ env.PROJECT_VERSION }}
           target: ${{ matrix.job.target }}
           nif-version: ${{ matrix.nif }}
-          use-cross: ${{ matrix.job.use-cross || false }}
+          use-cross: ${{ matrix.job.use-cross }}
+          cross-version: ${{ matrix.job.cross-version || 'from-source' }}
           project-dir: native/whiff_native
 
       - name: Attest artifact
