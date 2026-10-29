@@ -2,18 +2,48 @@
 
 Preferred path: **automated** via [`.github/workflows/release.yml`](../.github/workflows/release.yml).
 
-## Automated release
+## Do precompiled NIFs ship with the release?
 
-1. Bump `@version` in `mix.exs` and add a `CHANGELOG.md` entry.
-2. Commit on `main` (no remote write from agents unless asked).
-3. Tag exactly `vX.Y.Z` matching `@version` (example: `v0.1.0`).
-4. Push the tag: `git push origin v0.1.0` (or `git push origin main --tags`).
-5. Workflow **Release**:
-   - Builds precompiled NIFs for every configured native target
-   - Attaches archives to the GitHub Release
-   - Generates `checksum-Elixir.Whiff.Native.exs`
-   - Dry-runs, then `mix hex.publish --yes`
-6. Confirm Hex package + docs: https://hex.pm/packages/whiff
+**Yes.** Tagging `v0.1.0` runs the Release workflow, which:
+
+1. **Builds** precompiled `whiff_native` archives for each configured native target
+2. **Attaches** those archives to the **GitHub Release**  
+   `https://github.com/SinAnima/whiff-elixir/releases/download/v0.1.0/...`
+3. **Generates** `checksum-Elixir.Whiff.Native.exs` and includes it in the **Hex** package
+4. **Publishes** to Hex (`mix hex.publish --yes`)
+
+| Artifact | Where it lives |
+|---|---|
+| `.so` / `.dll` NIF tarballs | GitHub Release assets (not inside the Hex tarball) |
+| `checksum-Elixir.Whiff.Native.exs` | Hex package (required for verified download) |
+| Native sources + `Cargo.lock` | Hex package (source-build fallback) |
+
+Consumers without Rust download NIFs at compile time via RustlerPrecompiled.  
+`WHIFF_BUILD=1` (or missing checksum) still force-builds from source.
+
+### Targets built for v0.1.0
+
+- `aarch64-apple-darwin`
+- `x86_64-apple-darwin` (`macos-15-intel` runner)
+- `x86_64-unknown-linux-gnu`
+- `aarch64-unknown-linux-gnu` (cross)
+- `x86_64-pc-windows-msvc` (best-effort)
+
+Musl is **not** in v0.1.0.
+
+## Automated release (v0.1.0)
+
+1. Finish / merge all intended commits on `main` (`@version` is already `"0.1.0"`).
+2. Confirm secrets:
+   - `HEX_API_KEY` (repo or Environment `hex-production`)
+   - Environment `hex-production` created (approval gate recommended)
+3. Tag exactly: `git tag v0.1.0`
+4. Push tag: `git push origin v0.1.0` (and `main` if needed)
+5. Watch **Actions → Release**:
+   - `build_nifs` matrix succeeds
+   - GitHub Release `v0.1.0` has **5** NIF assets
+   - `publish_hex` generates checksum, dry-runs, publishes
+6. Confirm https://hex.pm/packages/whiff and HexDocs land on the README
 
 ### Secrets / environment
 
@@ -22,20 +52,14 @@ Preferred path: **automated** via [`.github/workflows/release.yml`](../.github/w
 | `HEX_API_KEY` | Repo secret and/or Environment `hex-production` | Hex publish |
 | Environment `hex-production` | GitHub → Settings → Environments | Optional approval gate before publish |
 
-Manual dry-run without publishing: **Actions → Release → Run workflow** with `dry_run: true` (still builds NIFs if you use a tag; for dispatch-only, tag wait is skipped — prefer tagging for a real release).
-
-## Preflight (still do these)
+## Preflight
 
 1. Hex package name `whiff` owned by the intended org/user.
-2. Tag == `v` + `mix.exs` `@version`.
-3. `CHANGELOG.md` complete for the version.
-4. ADR pins accurate: Rust `whiff` **0.5.1**, Hex Rustler **`~> 0.38`**.
-5. Native precompile targets match the release matrix:
-   - `aarch64-apple-darwin`
-   - `x86_64-apple-darwin`
-   - `x86_64-unknown-linux-gnu`
-   - `aarch64-unknown-linux-gnu`
-   - `x86_64-pc-windows-msvc`
+2. Tag == `v` + `mix.exs` `@version` → `v0.1.0`.
+3. `CHANGELOG.md` entry for `0.1.0` is complete.
+4. Pins: Rust `whiff` **0.5.1**, Hex Rustler **`~> 0.38`**.
+5. Do **not** commit `priv/native/*.so` or a hand-made checksum unless produced by the release job.
+6. `mix package.files` includes `checksum-*.exs` and native sources; excludes built NIFs.
 
 ## Manual fallback (if CI cannot publish)
 

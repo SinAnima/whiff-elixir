@@ -90,7 +90,7 @@ defmodule Whiff.MixProject do
 
   defp docs do
     [
-      main: "Whiff",
+      main: "readme",
       source_url: @source_url,
       extras: [
         "README.md",
