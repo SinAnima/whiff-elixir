@@ -55,7 +55,14 @@ defmodule Whiff.Test.TradeWhiffer do
   end
 
   defp parse(bytes) when is_binary(bytes) do
-    case String.split(bytes, "\n", trim: true) do
+    # Accept CRLF (Windows checkouts) and LF.
+    lines =
+      bytes
+      |> String.replace("\r\n", "\n")
+      |> String.replace("\r", "\n")
+      |> String.split("\n", trim: true)
+
+    case lines do
       ["TRADE/1" | rest] -> {:ok, trade_from_fields(parse_fields(rest))}
       _ -> {:error, :bad_magic}
     end
@@ -67,8 +74,8 @@ defmodule Whiff.Test.TradeWhiffer do
 
   defp parse_field_line(line) do
     case String.split(line, "=", parts: 2) do
-      [k, v] -> {k, v}
-      [k] -> {k, ""}
+      [k, v] -> {String.trim(k), String.trim(v)}
+      [k] -> {String.trim(k), ""}
     end
   end
 

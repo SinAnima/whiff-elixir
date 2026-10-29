@@ -60,13 +60,19 @@ defmodule TradeWhiffer do
   end
 
   defp parse(bytes) do
-    case String.split(bytes, "\n", trim: true) do
+    lines =
+      bytes
+      |> String.replace("\r\n", "\n")
+      |> String.replace("\r", "\n")
+      |> String.split("\n", trim: true)
+
+    case lines do
       ["TRADE/1" | rest] ->
         fields =
           Map.new(rest, fn line ->
             case String.split(line, "=", parts: 2) do
-              [k, v] -> {k, v}
-              [k] -> {k, ""}
+              [k, v] -> {String.trim(k), String.trim(v)}
+              [k] -> {String.trim(k), ""}
             end
           end)
 

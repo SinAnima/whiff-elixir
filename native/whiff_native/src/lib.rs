@@ -276,11 +276,7 @@ fn extract_bytes<'a>(
 }
 
 #[rustler::nif(schedule = "DirtyCpu")]
-fn llm_path<'a>(
-    env: Env<'a>,
-    path: String,
-    options_json: String,
-) -> NifResult<Term<'a>> {
+fn llm_path<'a>(env: Env<'a>, path: String, options_json: String) -> NifResult<Term<'a>> {
     let opts = match parse_options(&options_json) {
         Ok(o) => o,
         Err(e) => return Ok(err_term(env, atoms::invalid_option(), e)),
@@ -337,15 +333,12 @@ fn llm_bytes<'a>(
 #[rustler::nif]
 fn native_version<'a>(env: Env<'a>) -> Term<'a> {
     let mut map = Map::new();
-    map.insert("whiff".into(), Value::String(env!("CARGO_PKG_VERSION").into()));
     map.insert(
-        "crate".into(),
-        Value::String("0.5.1".into()),
+        "whiff".into(),
+        Value::String(env!("CARGO_PKG_VERSION").into()),
     );
-    map.insert(
-        "schema".into(),
-        Value::String(whiff::SCHEMA.into()),
-    );
+    map.insert("crate".into(), Value::String("0.5.1".into()));
+    map.insert("schema".into(), Value::String(whiff::SCHEMA.into()));
     map.insert(
         "features".into(),
         Value::Array(

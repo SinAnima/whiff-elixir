@@ -1,0 +1,9 @@
+# Keep fixture text files with LF so parsers and golden tests stay portable.
+*.trade text eol=lf
+*.txt text eol=lf
+*.ex text eol=lf
+*.exs text eol=lf
+*.md text eol=lf
+*.rs text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

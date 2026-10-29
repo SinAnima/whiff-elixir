@@ -20,6 +20,28 @@ defmodule Whiff.PluginTest do
     assert get_in(report, ["content", "title"]) =~ "Trade"
   end
 
+  test "fallback whiffer accepts CRLF trade fixtures (Windows checkouts)" do
+    path = Path.join(System.tmp_dir!(), "whiff-crlf-#{System.unique_integer([:positive])}.trade")
+
+    File.write!(
+      path,
+      "TRADE/1\r\nid=T-1001\r\ncurrency=USD\r\nqty=10\r\nprice=42.5\r\n"
+    )
+
+    try do
+      assert {:ok, report} =
+               Whiff.extract(path,
+                 extractors: [Whiff.Test.TradeWhiffer],
+                 mode: :fallback,
+                 hashes: :none
+               )
+
+      assert get_in(report, ["format", "test.trade", "trade_id"]) == "T-1001"
+    after
+      File.rm(path)
+    end
+  end
+
   test "augment known text with extra format namespace" do
     assert {:ok, report} =
              Whiff.extract(@hello,
