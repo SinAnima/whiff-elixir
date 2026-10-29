@@ -1,0 +1,4 @@
+# Smaller release NIF artifacts for RustlerPrecompiled GitHub Releases.
+[profile.release]
+lto = true
+codegen-units = 1

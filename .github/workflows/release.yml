@@ -1,0 +1,225 @@
+name: Release
+
+# Build precompiled NIFs for every RustlerPrecompiled target, attach them to the
+# GitHub Release for tag vX.Y.Z, generate checksum-Elixir.Whiff.Native.exs, and
+# publish the Hex package.
+#
+# Required repository secrets:
+#   HEX_API_KEY — Hex.pm API key with publish rights for `whiff`
+#
+# Optional GitHub Environment:
+#   hex-production — approve publish; wire HEX_API_KEY there if preferred
+#
+# Flow:
+#   1. Tag must match mix.exs @version (e.g. v0.1.0)
+#   2. Push tag → this workflow
+#   3. NIF matrix builds + uploads to the GitHub Release
+#   4. publish_hex downloads checksums from that release and runs mix hex.publish
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build NIFs and dry-run Hex publish (skip mix hex.publish --yes)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  MIX_ENV: prod
+  ELIXIR_VERSION: "1.18"
+  OTP_VERSION: "27"
+  RUST_VERSION: "1.91"
+
+jobs:
+  build_nifs:
+    name: NIF ${{ matrix.nif }} · ${{ matrix.job.target }}
+    runs-on: ${{ matrix.job.os }}
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      # Needed by actions/attest on some orgs
+      # artifact-metadata: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        nif: ["2.15"]
+        job:
+          - { target: aarch64-apple-darwin, os: macos-15 }
+          - { target: x86_64-apple-darwin, os: macos-15-intel }
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04, use-cross: true }
+          - { target: x86_64-pc-windows-msvc, os: windows-2022 }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract project version
+        shell: bash
+        run: |
+          VERSION=$(sed -n 's/^[[:space:]]*@version "\(.*\)"/\1/p' mix.exs | head -n1)
+          echo "PROJECT_VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "mix.exs version=${VERSION}"
+
+      - name: Assert tag matches mix.exs version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          EXPECTED="v${PROJECT_VERSION}"
+          if [[ "${TAG}" != "${EXPECTED}" ]]; then
+            echo "::error::Tag ${TAG} must equal ${EXPECTED} (mix.exs @version)"
+            exit 1
+          fi
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: ${{ matrix.job.target }}
+
+      - name: Build precompiled NIF
+        id: build-crate
+        uses: philss/rustler-precompiled-action@v1.1.5
+        with:
+          project-name: whiff_native
+          project-version: ${{ env.PROJECT_VERSION }}
+          target: ${{ matrix.job.target }}
+          nif-version: ${{ matrix.nif }}
+          use-cross: ${{ matrix.job.use-cross || false }}
+          project-dir: native/whiff_native
+
+      - name: Attest artifact
+        continue-on-error: true
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ steps.build-crate.outputs.file-path }}
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nif-${{ matrix.job.target }}-nif${{ matrix.nif }}
+          path: ${{ steps.build-crate.outputs.file-path }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          generate_release_notes: true
+          files: ${{ steps.build-crate.outputs.file-path }}
+
+  publish_hex:
+    name: Checksums + Hex publish
+    needs: build_nifs
+    # Hex publish requires a version tag so release assets exist at base_url.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    environment: hex-production
+    permissions:
+      contents: read
+
+    env:
+      HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract project version
+        shell: bash
+        run: |
+          VERSION=$(sed -n 's/^[[:space:]]*@version "\(.*\)"/\1/p' mix.exs | head -n1)
+          echo "PROJECT_VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Assert tag matches mix.exs version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          EXPECTED="v${PROJECT_VERSION}"
+          if [[ "${TAG}" != "${EXPECTED}" ]]; then
+            echo "::error::Tag ${TAG} must equal ${EXPECTED}"
+            exit 1
+          fi
+
+      - name: Setup BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - name: Install Rust (force-build bootstrap only)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Hex / Rebar / deps
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
+
+      - name: Wait for GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${PROJECT_VERSION}"
+          EXPECTED=5
+          echo "Waiting for ${EXPECTED} NIF assets on release ${TAG}..."
+          for i in $(seq 1 60); do
+            COUNT=$(gh release view "${TAG}" --json assets --jq '.assets | length' 2>/dev/null || echo 0)
+            echo "attempt ${i}: ${COUNT}/${EXPECTED} assets"
+            if [[ "${COUNT}" -ge "${EXPECTED}" ]]; then
+              gh release view "${TAG}" --json assets --jq '.assets[].name'
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Timed out waiting for release assets on ${TAG}"
+          exit 1
+
+      - name: Generate checksum-Elixir.Whiff.Native.exs
+        run: |
+          rm -f checksum-Elixir.Whiff.Native.exs
+          # Bootstrap-compile so Whiff.Native is loadable for the download task.
+          WHIFF_BUILD=1 mix compile
+          mix rustler_precompiled.download Whiff.Native --all --print --no-config
+          test -f checksum-Elixir.Whiff.Native.exs
+          # Drop the force-built NIF; verification must load precompiled artifacts.
+          mix clean
+          rm -rf native/whiff_native/target
+
+      - name: Verify package loads precompiled NIFs
+        run: |
+          # MIX_ENV=prod → force_build false → must use checksum + GitHub assets
+          mix compile --warnings-as-errors
+          mix hex.build --unpack
+          test -f checksum-Elixir.Whiff.Native.exs
+          ls -la checksum-Elixir.Whiff.Native.exs
+
+      - name: Hex dry-run
+        run: mix hex.publish --dry-run
+
+      - name: Publish to Hex.pm
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true'
+        run: mix hex.publish --yes
+
+      - name: Upload checksum artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksum-Elixir.Whiff.Native.exs
+          path: checksum-Elixir.Whiff.Native.exs

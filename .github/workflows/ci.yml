@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            elixir: "1.18"
+            otp: "27"
+          - os: macos-14
+            elixir: "1.18"
+            otp: "27"
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          toolchain: "1.91"
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/whiff_native/target
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}-${{ hashFiles('native/whiff_native/Cargo.lock') }}
+
+      - run: mix deps.get
+      - run: mix format --check-formatted
+      - run: mix compile --warnings-as-errors
+        env:
+          WHIFF_BUILD: "1"
+      - name: Credo
+        run: mix credo --strict
+      - name: Doctor
+        run: mix doctor
+      - name: Tests + coverage
+        run: mix coveralls
+        env:
+          WHIFF_BUILD: "1"
+
+      - name: Native fmt/clippy
+        if: runner.os == 'Linux'
+        working-directory: native/whiff_native
+        run: |
+          cargo fmt --check
+          cargo clippy -- -D warnings
+
+  best-effort-windows:
+    if: github.event_name == 'push'
+    runs-on: windows-2022
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18"
+          otp-version: "27"
+      - uses: dtolnay/rust-toolchain@stable
+      - run: mix deps.get
+      - run: mix test
+        env:
+          WHIFF_BUILD: "1"

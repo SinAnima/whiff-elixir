@@ -1,0 +1,16 @@
+[package]
+name = "whiff_native"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+publish = false
+
+[lib]
+name = "whiff_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.38"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+whiff = { version = "0.5.1", default-features = false, features = ["common"] }
