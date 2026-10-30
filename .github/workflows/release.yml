@@ -218,12 +218,22 @@ jobs:
           test -f checksum-Elixir.Whiff.Native.exs
           ls -la checksum-Elixir.Whiff.Native.exs
 
+      # ex_doc is only: [:dev, :docs] — MIX_ENV=prod omits the docs task and
+      # hex.publish fails. Keep checksum/verify above on prod; publish under dev.
       - name: Hex dry-run
-        run: mix hex.publish --dry-run
+        env:
+          MIX_ENV: dev
+        run: |
+          mix deps.get
+          mix hex.publish --dry-run
 
       - name: Publish to Hex.pm
         if: github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true'
-        run: mix hex.publish --yes
+        env:
+          MIX_ENV: dev
+        run: |
+          mix deps.get
+          mix hex.publish --yes
 
       - name: Upload checksum artifact
         uses: actions/upload-artifact@v4

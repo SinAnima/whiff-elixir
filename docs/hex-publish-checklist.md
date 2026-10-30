@@ -72,7 +72,10 @@ mix clean
 rm -rf native/whiff_native/target
 MIX_ENV=prod mix compile --warnings-as-errors
 MIX_ENV=prod mix hex.build --unpack
-MIX_ENV=prod mix hex.publish   # intentional; requires HEX_API_KEY / login
+# Publish under MIX_ENV=dev so ex_doc (only: [:dev, :docs]) is available.
+# Do NOT use MIX_ENV=prod for hex.publish — the docs task will be missing.
+MIX_ENV=dev mix deps.get
+MIX_ENV=dev mix hex.publish   # requires HEX_API_KEY / login
 ```
 
 ## Post-publish
