@@ -2,7 +2,7 @@
 
 **whiff** is an Elixir library that sniffs a file (or in-memory bytes) and returns one structured **`whiff/1`** report: what the file is, how it was identified, hashes, rights/security signals, content excerpts, and format-specific metadata — as a **string-keyed** map you can pattern-match and pipe through the rest of your app.
 
-It wraps the Rust [whiff](https://github.com/baoulo/whiff) crate (`0.5.1`) through a Rustler NIF, and adds first-class **Elixir extractors** (“Whiffers”) and **analyzers** that run in BEAM processes *outside* the native engine.
+It wraps the Rust [whiff](https://github.com/baoulo/whiff) crate (`0.6.0`) through a Rustler NIF, and adds first-class **Elixir extractors** (“Whiffers”) and **analyzers** that run in BEAM processes *outside* the native engine.
 
 ## What you get
 
@@ -10,7 +10,7 @@ A typical report looks like this (shape abbreviated):
 
 ```elixir
 %{
-  "whiff" => %{"schema" => "whiff/1", "version" => "0.5.1", "profile" => "standard"},
+  "whiff" => %{"schema" => "whiff/1", "version" => "0.6.0", "profile" => "standard"},
   "identification" => %{
     "format" => "pdf",
     "mime" => "application/pdf",
@@ -61,7 +61,7 @@ Whiff is a **library**, not a service: no database, no HTTP API of its own. Call
 ```elixir
 def deps do
   [
-    {:whiff, "~> 0.1.0"}
+    {:whiff, "~> 0.2.0"}
   ]
 end
 ```

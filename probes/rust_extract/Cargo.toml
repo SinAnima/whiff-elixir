@@ -6,4 +6,4 @@ publish = false
 
 [dependencies]
 serde_json = "1"
-whiff = { version = "0.5.1", default-features = false, features = ["common"] }
+whiff = { version = "0.6.0", default-features = false, features = ["common"] }

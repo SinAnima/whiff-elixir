@@ -236,6 +236,6 @@ defmodule Whiff do
   defp project_version do
     Application.spec(:whiff, :vsn) |> to_string()
   rescue
-    _ -> "0.1.0"
+    _ -> "0.2.0"
   end
 end

@@ -337,7 +337,7 @@ fn native_version<'a>(env: Env<'a>) -> Term<'a> {
         "whiff".into(),
         Value::String(env!("CARGO_PKG_VERSION").into()),
     );
-    map.insert("crate".into(), Value::String("0.5.1".into()));
+    map.insert("crate".into(), Value::String("0.6.0".into()));
     map.insert("schema".into(), Value::String(whiff::SCHEMA.into()));
     map.insert(
         "features".into(),

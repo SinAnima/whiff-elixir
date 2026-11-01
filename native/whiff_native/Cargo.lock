@@ -764,6 +764,7 @@ dependencies = [
  "base64",
  "indexmap",
  "quick-xml",
+ "serde",
  "time",
 ]
 
@@ -1407,9 +1408,9 @@ dependencies = [
 
 [[package]]
 name = "whiff"
-version = "0.5.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e2691eab961164186cf5a34c09615478489c4e5db42cf68ded369c77f3e818c"
+checksum = "502c9e6fe3e0af465fdcd93645f20b2497b5a0ff9ccef74d674d25a332511d89"
 dependencies = [
  "aho-corasick",
  "blake3",
@@ -1451,7 +1452,7 @@ dependencies = [
 
 [[package]]
 name = "whiff_native"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rustler",
  "serde",

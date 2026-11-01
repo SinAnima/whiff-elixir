@@ -2,13 +2,13 @@
 
 **Date:** 2026-10-28  
 **Status:** Accepted  
-**Upstream reviewed:** baoulo/whiff tag/crate `0.5.1`
+**Upstream reviewed:** baoulo/whiff tag/crate `0.6.0` (was `0.5.1` at Stage 0; API surface unchanged for this wrapper)
 
 ## Pins
 
 | Component | Version | Notes |
 |---|---|---|
-| Rust crate `whiff` | **0.5.1** exact | `default-features = false`, `features = ["common"]`; no `cli` |
+| Rust crate `whiff` | **0.6.0** exact | `default-features = false`, `features = ["common"]`; no `cli` |
 | Report schema | `whiff/1` (`whiff::SCHEMA`) | Vendored at `priv/schemas/whiff-1.schema.json` |
 | Rust (NIF crate MSRV) | **1.91+** | Native crate `rust-version`; local probe toolchain 1.97.1 |
 | Upstream whiff MSRV | 1.89 | Satisfied by NIF MSRV |
@@ -24,7 +24,7 @@ Extract / LLM NIFs are scheduled on **DirtyCpu**. After open/read, work is CPU-b
 
 Reports leave the NIF as UTF-8 JSON via Rustler **`NewBinary`** (owned BEAM binary). Elixir decodes with Jason into **string-keyed** maps — no uncontrolled atom keys.
 
-## Verified upstream API facts (0.5.1)
+## Verified upstream API facts (0.6.0; same surface as 0.5.1 for this NIF)
 
 - `Engine` is `Clone` / `Sync`; builder supports `profile`, `limits`, `hashes`, `only`, `skip`, `format`, `provenance`, `privacy`, `registry`, `options`, `build`.
 - `Profile`: `Minimal`, `Standard` (default), `Full`, `Llm`. Setting profile resets limits unless `limits` was set explicitly.

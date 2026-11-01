@@ -1,4 +1,4 @@
-//! Stage 0 probe: pin whiff 0.5.1 and exercise Engine / llm_view / errors.
+//! Stage 0 probe: pin whiff 0.6.0 and exercise Engine / llm_view / errors.
 
 use std::env;
 use std::path::PathBuf;
