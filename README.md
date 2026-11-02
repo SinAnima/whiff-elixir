@@ -37,7 +37,7 @@ Format coverage comes from upstream Rust **whiff**. The authoritative list of fo
 
 **[whiff: metadata extracted per file format](https://github.com/baoulo/whiff/blob/main/docs/metadata-extracted.md)**
 
-This Elixir package ships the NIF with the **`common`** feature set (text, web, data, code, images, documents, email, audio/video, archives, packages, executables, certificates, SQLite, fonts, …). Specialist collections (`geo`, `science`, `data`, `cad`, `forensics`, `games`, or `full`) are documented upstream but are **not** enabled in v0.1 of this wrapper.
+This Elixir package ships the NIF with the **`common`** feature set (text, web, data, code, images, documents, email, audio/video, archives, packages, executables, certificates, SQLite, fonts, …). Specialist collections (`geo`, `science`, `data`, `cad`, `forensics`, `games`, or `full`) are documented upstream but are **not** enabled in this wrapper (through 0.3.x).
 
 Anything outside native coverage can still be handled with an Elixir `Whiff.Extractor` (see examples below).
 
@@ -61,7 +61,7 @@ Whiff is a **library**, not a service: no database, no HTTP API of its own. Call
 ```elixir
 def deps do
   [
-    {:whiff, "~> 0.2.0"}
+    {:whiff, "~> 0.3.0"}
   ]
 end
 ```
@@ -70,6 +70,72 @@ end
 
 - **Dev / test:** source-builds by default (`force_build`, or set `WHIFF_BUILD=1`). Needs Rust **1.91+**.
 - **Prod / Hex:** precompiled NIFs from GitHub Releases. Tagging `vX.Y.Z` runs [`.github/workflows/release.yml`](.github/workflows/release.yml) (build artifacts → checksum → Hex publish).
+
+## Configuration
+
+Set in `config/config.exs` (or runtime config). All keys are optional.
+
+```elixir
+config :whiff,
+  # Default Elixir plugins (merged with per-call :extractors / :analyzers)
+  extractors: [],
+  analyzers: [],
+
+  # Max concurrent DirtyCpu NIF calls (ETS semaphore; default 8, max 128)
+  native_max_concurrency: 8,
+
+  # Scratch staging for `stage: :local` (see below)
+  scratch_dir: "/var/cache/whiff",     # nil → System.tmp_dir!()/whiff-scratch
+  scratch_max_bytes: 1_073_741_824     # refuse staging above this size (1 GiB)
+```
+
+| Key | Default | Purpose |
+|---|---|---|
+| `:extractors` | `[]` | Modules implementing `Whiff.Extractor` |
+| `:analyzers` | `[]` | Modules implementing `Whiff.Analyzer` |
+| `:native_max_concurrency` | `8` | Cap concurrent native extracts / LLM path calls |
+| `:scratch_dir` | tmp `whiff-scratch` | Destination for `stage: :local` copies |
+| `:scratch_max_bytes` | `1_073_741_824` | Max file size allowed to stage |
+
+### Slow / network filesystems (`stage: :local`)
+
+Path extract (`Whiff.extract/2`, `Whiff.llm/2`) opens and reads the file **inside** a DirtyCpu NIF. On NFS or other high-latency mounts that can pin DirtyCpu threads waiting on I/O.
+
+**Large files on slow storage** — copy to local scratch on the BEAM first, then open the scratch path in the NIF (still streamed / limit-aware; not a full `extract_binary`):
+
+```elixir
+# config/runtime.exs (or config.exs)
+config :whiff,
+  scratch_dir: "/var/cache/whiff",
+  scratch_max_bytes: 4 * 1024 * 1024 * 1024
+
+# call site
+{:ok, report} =
+  Whiff.extract("/mnt/nfs/ingest/huge.zip",
+    stage: :local,
+    profile: :standard,
+    privacy: :strict,
+    hashes: :none
+  )
+
+{:ok, compact} =
+  Whiff.llm("/mnt/nfs/docs/msa.pdf", stage: :local, tokens: 800)
+```
+
+Staging keeps the original basename under a unique job directory, then deletes it when the call finishes. Files larger than `:scratch_max_bytes` return `{:error, %Whiff.Error{reason: :invalid_option}}`.
+
+Default is `stage: :never` (direct path open). Mount tmpfs at `scratch_dir` if you want RAM-backed scratch without loading the whole file into the BEAM.
+
+**Small uploads already in memory** — prefer `Whiff.extract_binary/2` (no path I/O in the NIF):
+
+```elixir
+{:ok, report} =
+  Whiff.extract_binary(upload_bytes, name: upload.filename, privacy: :strict)
+```
+
+### Native concurrency limiter
+
+Concurrent NIF work is bounded by `:native_max_concurrency`. If a caller waits longer than ~60s for a slot, acquisition **fail-opens** (runs anyway) **without** corrupting the in-flight counter — only successful acquires are released.
 
 ## Requirements
 
@@ -89,7 +155,7 @@ Rustler **0.39** is on crates.io but **not on Hex** as of 2026-10-28; this packa
 | `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin` | Mandatory CI |
 | `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin` | Precompiled / best-effort |
 | `x86_64-pc-windows-msvc` | Best-effort |
-| musl / static Linux | Deferred (not v0.1) |
+| musl / static Linux | Deferred (not in 0.3.x) |
 
 ## Examples
 
@@ -97,6 +163,7 @@ Rustler **0.39** is on crates.io but **not on Hex** as of 2026-10-28; this packa
 
 ```elixir
 def accept_upload(%Plug.Upload{path: path, filename: name}) do
+  # Plug already wrote a local temp file — no staging needed.
   case Whiff.extract(path, profile: :standard, privacy: :strict) do
     {:ok, report} ->
       format = report["identification"]["format"]
@@ -117,6 +184,20 @@ def accept_upload(%Plug.Upload{path: path, filename: name}) do
     {:error, %Whiff.Error{} = err} ->
       {:error, err}
   end
+end
+```
+
+### Ingest from an NFS / object-fuse mount
+
+```elixir
+def ingest_from_share(path) do
+  Whiff.extract(path,
+    stage: :local,
+    profile: :standard,
+    privacy: :strict,
+    hashes: [:sha256],
+    limits: [file_timeout_ms: 120_000]
+  )
 end
 ```
 
@@ -303,16 +384,18 @@ end
 | `strict:` | plugin failure → `{:error, _}` instead of diagnostics |
 | `plugin_timeout_ms:` | default `5000` |
 | `tokens:` | LLM budget for `Whiff.llm/2` (default `800`) |
+| `stage:` | `:never` (default) \| `:local` — copy to `:scratch_dir` before path NIF |
 
 Native `limits` apply to the Rust engine. Elixir plugin timeouts are separate (`plugin_timeout_ms`).
 
 **Privacy caveat:** upstream privacy analysis does **not** automatically cover fields added later by Elixir plugins. With `privacy: :strict`, plugin patches get a local scrub — not claimed equivalent to native redaction.
 
-## Limitations (v0.1)
+## Limitations
 
 - Native `file_timeout` may abandon worker threads; BEAM timeouts cannot kill them.
 - No zero-copy guarantee for `extract_binary` (data may be copied into `Arc<[u8]>`).
 - No Elixir callbacks inside native recursion; no streaming `extract_reader` NIF.
+- `stage: :local` copies the whole file to scratch (bounded by `:scratch_max_bytes`); it does not stream-stage.
 - Do not log secrets, full paths, or raw binary content by default.
 
 ## Develop

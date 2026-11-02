@@ -4,7 +4,9 @@ defmodule Whiff.ScratchTest do
   @fixture Path.expand("../fixtures/hello.txt", __DIR__)
 
   setup do
-    scratch = Path.join(System.tmp_dir!(), "whiff-scratch-test-#{System.unique_integer([:positive])}")
+    scratch =
+      Path.join(System.tmp_dir!(), "whiff-scratch-test-#{System.unique_integer([:positive])}")
+
     prev_dir = Application.get_env(:whiff, :scratch_dir)
     prev_max = Application.get_env(:whiff, :scratch_max_bytes)
 

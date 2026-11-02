@@ -11,7 +11,7 @@ name: Release
 #   hex-production — approve publish; wire HEX_API_KEY there if preferred
 #
 # Flow:
-#   1. Tag must match mix.exs @version (e.g. v0.2.0)
+#   1. Tag must match mix.exs @version (e.g. v0.3.0)
 #   2. Push tag → this workflow
 #   3. NIF matrix builds + uploads to the GitHub Release
 #   4. publish_hex downloads checksums from that release and runs mix hex.publish

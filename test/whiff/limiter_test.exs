@@ -39,6 +39,7 @@ defmodule Whiff.LimiterTest do
       Task.async(fn ->
         Whiff.Limiter.with_native(fn ->
           send(parent, :held)
+
           receive do
             :release -> :ok
           after

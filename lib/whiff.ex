@@ -131,7 +131,6 @@ defmodule Whiff do
     end
   end
 
-
   def llm(_, _), do: {:error, Error.new(:unsupported_input, "path must be a binary")}
 
   @doc "Same as `llm/2` but raises `Whiff.Error`."
