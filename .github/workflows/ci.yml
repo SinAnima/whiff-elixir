@@ -14,7 +14,9 @@ jobs:
           - os: ubuntu-22.04
             elixir: "1.18"
             otp: "27"
-          - os: macos-14
+          # macos-14 stopped getting runners (job cancelled with empty steps);
+          # align with Release, which builds NIFs on macos-15.
+          - os: macos-15
             elixir: "1.18"
             otp: "27"
 
