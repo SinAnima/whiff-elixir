@@ -24,8 +24,15 @@ defmodule Whiff.Application do
           write_concurrency: true
         ])
 
-        :ets.insert(:whiff_native_limiter, {:max, 8})
+        max =
+          case Application.get_env(:whiff, :native_max_concurrency, 8) do
+            n when is_integer(n) and n > 0 and n <= 128 -> n
+            _ -> 8
+          end
+
+        :ets.insert(:whiff_native_limiter, {:max, max})
         :ets.insert(:whiff_native_limiter, {:current, 0})
+        :ets.insert(:whiff_native_limiter, {:wait_ms, 60_000})
         :ok
 
       _ ->

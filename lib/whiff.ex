@@ -15,7 +15,7 @@ defmodule Whiff do
   outside the NIF.
   """
 
-  alias Whiff.{Error, Input, Limiter, Native, Options, Registry, Report}
+  alias Whiff.{Error, Input, Limiter, Native, Options, Registry, Report, Scratch}
 
   @type report :: %{optional(String.t()) => term()}
   @type result :: {:ok, report()} | {:error, Error.t()}
@@ -38,15 +38,28 @@ defmodule Whiff do
 
   Pipeline: `:mode` (`:fallback` | `:augment` | `:override`), `:extractors`,
   `:analyzers`, `:strict`, `:plugin_timeout_ms`, `:override_fields`.
+
+  Staging: `:stage` (`:never` | `:local`). When `:local`, the file is copied to
+  the configured scratch directory (`:whiff, :scratch_dir`) on the BEAM before
+  the DirtyCpu NIF opens it — useful for large files on slow/network storage.
   """
   @spec extract(Path.t(), keyword()) :: result()
   def extract(path, opts \\ [])
 
   def extract(path, opts) when is_binary(path) and is_list(opts) do
     with {:ok, options} <- Options.validate(opts),
-         input = Input.from_path(path),
-         {:ok, report} <- native_extract_path(path, options) do
-      Registry.run(input, report, options)
+         {:ok, stage_tag} <- Scratch.stage(path, options) do
+      staged_path = Scratch.path(path, stage_tag)
+
+      try do
+        input = Input.from_path(path)
+
+        with {:ok, report} <- native_extract_path(staged_path, options) do
+          Registry.run(input, report, options)
+        end
+      after
+        Scratch.cleanup(stage_tag)
+      end
     end
   end
 
@@ -97,16 +110,27 @@ defmodule Whiff do
   Compact LLM projection for a path (`Report::llm_view`).
 
   Default token budget: `800` (override with `tokens:`).
+
+  Accepts the same staging option as `extract/2`: `stage: :local` copies to
+  scratch before the DirtyCpu NIF (see Configuration in the README).
   """
   @spec llm(Path.t(), keyword()) :: result()
   def llm(path, opts \\ [])
 
   def llm(path, opts) when is_binary(path) and is_list(opts) do
-    with {:ok, options} <- Options.validate(opts) do
-      json = Options.to_native_json(options)
-      Limiter.with_native(fn -> call_llm_path(path, json) end)
+    with {:ok, options} <- Options.validate(opts),
+         {:ok, stage_tag} <- Scratch.stage(path, options) do
+      staged_path = Scratch.path(path, stage_tag)
+
+      try do
+        json = Options.to_native_json(options)
+        Limiter.with_native(fn -> call_llm_path(staged_path, json) end)
+      after
+        Scratch.cleanup(stage_tag)
+      end
     end
   end
+
 
   def llm(_, _), do: {:error, Error.new(:unsupported_input, "path must be a binary")}
 
@@ -236,6 +260,6 @@ defmodule Whiff do
   defp project_version do
     Application.spec(:whiff, :vsn) |> to_string()
   rescue
-    _ -> "0.2.0"
+    _ -> "0.3.0"
   end
 end
