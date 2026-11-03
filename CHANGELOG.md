@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.3.0 — 2026-11-02
+
+### Added
+
+- Opt-in local scratch staging: `stage: :local` on `extract/2` and `llm/2`
+  copies the file to a local directory on the BEAM **before** the DirtyCpu NIF
+  opens it. Useful for large files on NFS or other high-latency mounts.
+  - Per-call: `Whiff.extract(path, stage: :local)`
+  - App config: `:scratch_dir` (default `System.tmp_dir!()/whiff-scratch`),
+    `:scratch_max_bytes` (default 1 GiB; refuse staging above this size)
+  - Staged copies keep the original basename under a unique job directory and
+    are deleted after the call
+- Application config `:native_max_concurrency` (default `8`) sets the native
+  limiter cap at startup
+
+### Fixed
+
+- `Whiff.Limiter` fail-open after the wait budget no longer calls `release/0`
+  without an acquire (which permanently undercounted in-flight NIF work).
+  Acquire returns `:acquired | :bypassed`; only `:acquired` releases.
+- Limiter saturation detection now uses an uncapped ETS increment; the previous
+  threshold form never observed “over max”
+
+### Docs
+
+- README: Configuration section, slow-filesystem guidance, staging examples
+- ADR 0001 amended for DirtyCpu path I/O + scratch escape hatch
+- Hex publish checklist updated for `v0.3.0`
+
 ## 0.2.0 — 2026-10-31
 
 ### Changed

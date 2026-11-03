@@ -22,6 +22,8 @@
 
 Extract / LLM NIFs are scheduled on **DirtyCpu**. After open/read, work is CPU-bound parsing/hashing; DirtyIo alone would still starve regular schedulers during extractors.
 
+Path-based extract therefore performs file I/O on DirtyCpu threads. For large files on slow/network storage, callers may set `stage: :local` so Elixir copies to a configured local `scratch_dir` **before** acquiring the native limiter / entering the NIF; the NIF then opens the scratch path. Small in-memory payloads should use `extract_binary/2`. Auto-detecting slow mounts is out of scope.
+
 Reports leave the NIF as UTF-8 JSON via Rustler **`NewBinary`** (owned BEAM binary). Elixir decodes with Jason into **string-keyed** maps — no uncontrolled atom keys.
 
 ## Verified upstream API facts (0.6.0; same surface as 0.5.1 for this NIF)

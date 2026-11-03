@@ -4,12 +4,13 @@ defmodule Whiff.Options do
   @known_keys ~w(
     profile hashes privacy only skip format provenance limits tokens
     extractors analyzers mode strict plugin_timeout_ms max_concurrency on_error
-    name filename mime override_fields
+    name filename mime override_fields stage
   )a
 
   @profiles ~w(minimal standard full llm)a
   @privacy ~w(strict off)a
   @modes ~w(fallback augment override)a
+  @stages ~w(never local)a
 
   @limit_keys ~w(
     max_read_bytes max_decompressed_bytes max_depth max_children
@@ -94,7 +95,8 @@ defmodule Whiff.Options do
       strict: false,
       plugin_timeout_ms: 5_000,
       provenance: false,
-      tokens: 800
+      tokens: 800,
+      stage: :never
     }
 
     Enum.reduce_while(opts, {:ok, base}, fn {key, value}, {:ok, acc} ->
@@ -204,6 +206,13 @@ defmodule Whiff.Options do
     do:
       {:error,
        Whiff.Error.new(:invalid_option, "on_error must be :collect or :halt, got: #{inspect(v)}")}
+
+  defp normalize_one(:stage, v) when v in @stages, do: {:ok, v}
+
+  defp normalize_one(:stage, v),
+    do:
+      {:error,
+       Whiff.Error.new(:invalid_option, "stage must be :never or :local, got: #{inspect(v)}")}
 
   defp normalize_one(:limits, list) when is_list(list), do: validate_limits(list)
 
