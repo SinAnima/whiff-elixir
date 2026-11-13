@@ -44,7 +44,10 @@ defmodule Whiff.ScratchTest do
     |> update_in(["diagnostics"], &Map.drop(&1, ["elapsed_ms", "warnings"]))
     |> update_in(["diagnostics", "extractors"], fn runs -> Enum.map(runs, &Map.delete(&1, "ms")) end)
     |> update_in(["temporal", "filesystem"], &Map.drop(&1, ["created", "accessed", "modified"]))
-    |> update_in(["system"], &Map.drop(&1, ["allocated_bytes", "sparse", "device", "inode", "links"]))
+    |> update_in(
+      ["system"],
+      &Map.drop(&1, ["allocated_bytes", "sparse", "device", "inode", "links"])
+    )
     |> update_in(["security"], &Map.drop(&1, ["acl", "xattrs", "owner"]))
   end
 
@@ -179,4 +182,3 @@ defmodule Whiff.ScratchTest do
     end
   end
 end
-
