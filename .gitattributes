@@ -8,5 +8,7 @@
 *.rs text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
-# Golden JSON is generated; keep bytes as committed (no CRLF rewrite).
-test/fixtures/golden/** -text
+*.pdf binary
+# Fixtures and goldens are compared byte for byte (sizes, hashes). Never
+# rewrite line endings on checkout, even with core.autocrlf=true.
+test/fixtures/** -text
