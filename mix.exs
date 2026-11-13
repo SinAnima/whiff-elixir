@@ -71,6 +71,7 @@ defmodule Whiff.MixProject do
   defp package do
     [
       name: "whiff",
+      maintainers: ["Thanos Vassilakis"],
       licenses: ["MIT"],
       links: %{
         "GitHub" => @source_url,
