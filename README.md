@@ -2,7 +2,7 @@
 
 **whiff** is an Elixir library that sniffs a file (or in-memory bytes) and returns one structured **`whiff/1`** report: what the file is, how it was identified, hashes, rights/security signals, content excerpts, and format-specific metadata — as a **string-keyed** map you can pattern-match and pipe through the rest of your app.
 
-It wraps the Rust [whiff](https://github.com/baoulo/whiff) crate (`0.6.0`) through a Rustler NIF, and adds first-class **Elixir extractors** (“Whiffers”) and **analyzers** that run in BEAM processes *outside* the native engine.
+It wraps the Rust [whiff](https://github.com/baoulo/whiff) crate (`0.8.0`) through a Rustler NIF, and adds first-class **Elixir extractors** (“Whiffers”) and **analyzers** that run in BEAM processes *outside* the native engine.
 
 ## What you get
 
@@ -10,7 +10,7 @@ A typical report looks like this (shape abbreviated):
 
 ```elixir
 %{
-  "whiff" => %{"schema" => "whiff/1", "version" => "0.6.0", "profile" => "standard"},
+  "whiff" => %{"schema" => "whiff/1", "version" => "0.8.0", "profile" => "standard"},
   "identification" => %{
     "format" => "pdf",
     "mime" => "application/pdf",
@@ -37,7 +37,7 @@ Format coverage comes from upstream Rust **whiff**. The authoritative list of fo
 
 **[whiff: metadata extracted per file format](https://github.com/baoulo/whiff/blob/main/docs/metadata-extracted.md)**
 
-This Elixir package ships the NIF with the **`common`** feature set (text, web, data, code, images, documents, email, audio/video, archives, packages, executables, certificates, SQLite, fonts, …). Specialist collections (`geo`, `science`, `data`, `cad`, `forensics`, `games`, or `full`) are documented upstream but are **not** enabled in this wrapper (through 0.3.x).
+This Elixir package ships the NIF with the **`common`** feature set (text, web, code, images, documents, email, audio/video, archives, packages, executables, certificates, SQLite, fonts, markup, configs, …). Specialist collections (`geo`, `science`, `data`, `cad`, `forensics`, `games`, or `full`) are documented upstream but are **not** enabled in this wrapper (through 0.4.x).
 
 Anything outside native coverage can still be handled with an Elixir `Whiff.Extractor` (see examples below).
 
@@ -61,7 +61,7 @@ Whiff is a **library**, not a service: no database, no HTTP API of its own. Call
 ```elixir
 def deps do
   [
-    {:whiff, "~> 0.3.0"}
+    {:whiff, "~> 0.4.0"}
   ]
 end
 ```
@@ -155,7 +155,7 @@ Rustler **0.39** is on crates.io but **not on Hex** as of 2026-10-28; this packa
 | `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin` | Mandatory CI |
 | `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin` | Precompiled / best-effort |
 | `x86_64-pc-windows-msvc` | Best-effort |
-| musl / static Linux | Deferred (not in 0.3.x) |
+| musl / static Linux | Deferred (not in 0.4.x) |
 
 ## Examples
 

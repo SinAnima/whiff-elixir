@@ -1,20 +1,33 @@
 defmodule TradeWhiffer do
   @moduledoc """
-  Example external Hex-style whiffer package for proprietary `.trade` files.
+  Example `Whiff.Extractor` for proprietary `.trade` text files.
+
+  Demonstrates a path-dependent Hex package that registers at call time with
+  `extractors: [TradeWhiffer]` and `mode: :fallback`.
   """
 
   @behaviour Whiff.Extractor
 
+  @doc "Stable extractor id (`\"example.trade\"`)."
   @impl true
   def id, do: "example.trade"
 
+  @doc "Patch shape version."
   @impl true
   def version, do: 1
 
+  @doc """
+  True when the input extension is `.trade`.
+  """
   @impl true
   def supports?(%Whiff.Input{extension: ".trade"}, _native), do: true
   def supports?(_, _), do: false
 
+  @doc """
+  Parse a `TRADE/1` body into a namespaced `format.example.trade` patch.
+
+  Returns `{:ok, patch}` or `{:error, %Whiff.Error{reason: :extractor_error}}`.
+  """
   @impl true
   def extract(%Whiff.Input{path: path}, _native) when is_binary(path) do
     with {:ok, stat} <- File.stat(path),

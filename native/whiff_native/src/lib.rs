@@ -90,10 +90,8 @@ fn privacy_from(s: &str) -> Result<Privacy, String> {
 fn hashes_from(opt: HashesOpt) -> Result<Hashes, String> {
     match opt {
         HashesOpt::Named(name) => match name.as_str() {
-            "all" => Ok(Hashes {
-                sha256: true,
-                blake3: true,
-            }),
+            // Hashes is #[non_exhaustive] since whiff 0.8 — use constructors.
+            "all" => Ok(Hashes::default()),
             "none" => Ok(Hashes::NONE),
             other => Err(format!("invalid hashes `{other}`")),
         },
@@ -215,6 +213,8 @@ fn map_io_error<'a>(env: Env<'a>, err: WhiffError) -> Term<'a> {
             let msg = format!("{}: {source}", path.display());
             (atoms::error(), reason, msg).encode(env)
         }
+        // Error is #[non_exhaustive] since whiff 0.8.
+        other => err_term(env, atoms::native_error(), other.to_string()),
     }
 }
 
@@ -337,7 +337,7 @@ fn native_version<'a>(env: Env<'a>) -> Term<'a> {
         "whiff".into(),
         Value::String(env!("CARGO_PKG_VERSION").into()),
     );
-    map.insert("crate".into(), Value::String("0.6.0".into()));
+    map.insert("crate".into(), Value::String("0.8.0".into()));
     map.insert("schema".into(), Value::String(whiff::SCHEMA.into()));
     map.insert(
         "features".into(),

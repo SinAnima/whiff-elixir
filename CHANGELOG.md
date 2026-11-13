@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.4.0 — 2026-11-12
+
+### Changed
+
+- Upstream Rust `whiff` pin **0.6.0 → 0.8.0** (`common` feature only).
+  Report schema id remains `whiff/1`; vendored `priv/schemas/whiff-1.schema.json`
+  refreshed from upstream (1.0 baseline freeze; additive growth).
+- NIF adapted for whiff 0.8 library API: `Hashes` / `Error` are
+  `#[non_exhaustive]` — use `Hashes::default()` / `Hashes::NONE` and a
+  wildcard error arm.
+- Native `common` coverage grows with upstream 0.7–0.8 (fonts, markup,
+  configs, many more source languages, package manifests, …). Specialist
+  Cargo features (`games`, `geo`, `science`, `data`, `cad`, `forensics`)
+  remain **disabled** in this package.
+
+### Tests
+
+- Expanded coverage for options validation, scratch error paths, plugin runner,
+  privacy scrubbing, and report helpers; include limiter in coveralls.
+- Coveralls minimum raised **70 → 90** (suite ~92%).
+
+### Notes
+
+- Tag `v0.4.0` so Release rebuilds precompiled NIFs and regenerates
+  `checksum-Elixir.Whiff.Native.exs` for Hex.
+
 ## 0.3.0 — 2026-11-02
 
 ### Added

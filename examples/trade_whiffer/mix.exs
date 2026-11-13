@@ -17,7 +17,10 @@ defmodule TradeWhiffer.MixProject do
 
   defp deps do
     [
-      {:whiff, path: "../.."}
+      {:whiff, path: "../.."},
+      # Path deps compile under Mix.env :dev/:test, which forces a NIF source build.
+      {:rustler, "~> 0.38", optional: true}
     ]
   end
 end
+

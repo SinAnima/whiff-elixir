@@ -3,6 +3,8 @@ defmodule WhiffTest do
 
   @moduletag :native
 
+  doctest Whiff
+
   @fixture Path.expand("fixtures/hello.txt", __DIR__)
 
   test "schema_version/0" do
@@ -59,6 +61,26 @@ defmodule WhiffTest do
     assert {:error, %Whiff.Error{reason: :unsupported_input}} = Whiff.extract_binary(123)
     assert {:error, %Whiff.Error{reason: :unsupported_input}} = Whiff.extract_many("nope")
     assert {:error, %Whiff.Error{reason: :unsupported_input}} = Whiff.llm(123)
+
+    assert {:error, %Whiff.Error{reason: :invalid_option}} =
+             Whiff.extract_binary("x", name: :atom)
+  end
+
+  test "Error.message includes path when present" do
+    err = Whiff.Error.new(:enoent, "gone", path: "/tmp/x")
+    assert Exception.message(err) =~ "path: /tmp/x"
+    assert Exception.message(Whiff.Error.new(:native_error, "x")) == "native_error: x"
+  end
+
+  test "extract_many collect returns path/result pairs" do
+    missing = "/tmp/whiff-missing-collect-#{System.unique_integer([:positive])}.bin"
+
+    assert {:ok, pairs} =
+             Whiff.extract_many([@fixture, missing], on_error: :collect, hashes: :none)
+
+    assert length(pairs) == 2
+    assert match?({@fixture, {:ok, _}}, hd(pairs))
+    assert match?({^missing, {:error, %Whiff.Error{reason: :enoent}}}, List.last(pairs))
   end
 
   test "extract_many halt stops on first error" do

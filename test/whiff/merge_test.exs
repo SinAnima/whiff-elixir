@@ -1,6 +1,8 @@
 defmodule Whiff.MergeTest do
   use ExUnit.Case, async: true
 
+  doctest Whiff.Merge
+
   alias Whiff.Merge
 
   @base %{

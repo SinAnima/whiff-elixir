@@ -1,14 +1,14 @@
 defmodule Whiff.Error do
   @moduledoc """
-  Error and exception type for all public `Whiff` APIs.
+  Error and exception type for public `Whiff` APIs.
 
   Non-bang functions return `{:error, %Whiff.Error{}}`. Bang functions
   (`extract!/2`, `extract_binary!/2`, `llm!/2`) raise this same struct.
 
   ## Fields
 
-  * `:reason` — stable atom classifying the failure (see `t:reason/0`)
-  * `:message` — human-readable description (no file contents or secrets)
+  * `:reason` — `t:reason/0` classifying the failure
+  * `:message` — short UTF-8 description (no file contents or secrets)
   * `:path` — filesystem path or logical name when relevant; otherwise `nil`
   * `:details` — optional metadata map; keys `:bytes`, `:content`, and `:binary`
     (atom or string) are stripped so payloads are not retained
@@ -27,14 +27,12 @@ defmodule Whiff.Error do
   @typedoc """
   Stable failure classification.
 
-  Common values:
-
   * `:enoent` — path not found
   * `:eacces` — permission denied inspecting the path
   * `:invalid_option` — unknown or invalid option
   * `:unsupported_input` — wrong argument type (non-binary path/bytes, etc.)
   * `:native_error` — other native/IO failure
-  * `:extractor_error` / `:analyzer_error` — Elixir plugin failure (strict mode)
+  * `:extractor_error` / `:analyzer_error` — Elixir plugin failure (`strict: true`)
   * `:invalid_report` — report/patch failed validation or JSON decode
   * `:timeout` — plugin task exceeded `plugin_timeout_ms`
   * `:conflict` — merge collision (namespaced keys / protected fields)
@@ -53,7 +51,16 @@ defmodule Whiff.Error do
           | atom()
 
   @typedoc """
-  Public error struct. See the module doc for field meanings.
+  Public error struct.
+
+  ## Example
+
+      %Whiff.Error{
+        reason: :invalid_option,
+        message: "unknown option(s): [:nope]",
+        path: nil,
+        details: %{unknown: [:nope]}
+      }
   """
   @type t :: %__MODULE__{
           message: String.t(),
@@ -64,6 +71,19 @@ defmodule Whiff.Error do
 
   defexception [:message, :reason, :path, details: %{}]
 
+  @doc """
+  Formats the exception for `Exception.message/1`.
+
+  Includes `path:` when `:path` is set.
+
+  ## Examples
+
+      iex> Exception.message(Whiff.Error.new(:enoent, "gone", path: "/tmp/x"))
+      "enoent: gone (path: /tmp/x)"
+
+      iex> Exception.message(Whiff.Error.new(:native_error, "boom"))
+      "native_error: boom"
+  """
   @impl true
   def message(%__MODULE__{message: message, reason: reason, path: path}) do
     base = "#{reason}: #{message}"
@@ -80,11 +100,15 @@ defmodule Whiff.Error do
 
   ## Arguments
 
-  * `reason` — `t:reason/0` atom
+  * `reason` — `t:reason/0`
   * `message` — short UTF-8 description
   * `opts` — optional keywords:
     * `:path` — `String.t()` associated path or name
     * `:details` — `map()` of extra context (sensitive keys scrubbed)
+
+  ## Returns
+
+  A `%Whiff.Error{}` suitable for `{:error, err}` tuples or for raising.
 
   ## Examples
 

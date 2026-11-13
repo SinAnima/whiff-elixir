@@ -1,9 +1,11 @@
 # TradeWhiffer
 
-Tiny example package showing how to register an external `Whiff.Extractor`
-without hardcoding it into core `whiff`.
+Example Hex-style package that implements `Whiff.Extractor` for proprietary
+`.trade` files without hardcoding into core `whiff`.
 
-Depends on the parent project via `path: "../.."` (use `{:whiff, "~> 0.3.0"}` from Hex in a real app).
+Depends on the parent project via `path: "../.."` (use `{:whiff, "~> 0.4.0"}`
+from Hex in a real app). Path development also pulls optional `:rustler` so
+local NIF source builds can compile.
 
 ## Fallback Whiffer
 
@@ -11,8 +13,11 @@ Depends on the parent project via `path: "../.."` (use `{:whiff, "~> 0.3.0"}` fr
 {:ok, report} =
   Whiff.extract("sample.trade",
     extractors: [TradeWhiffer],
-    mode: :fallback
+    mode: :fallback,
+    hashes: :none
   )
+
+get_in(report, ["format", "example.trade", "trade_id"])
 ```
 
 ## With local scratch (slow share)
@@ -34,4 +39,13 @@ config :whiff,
   )
 ```
 
-Staging copies on the BEAM; Elixir plugins still see the original path/filename via `Whiff.Input`.
+Staging copies on the BEAM; Elixir plugins still see the original path and
+filename via `Whiff.Input`.
+
+## Test
+
+```bash
+mix test
+```
+
+Uses `test/fixtures/sample.trade` from the parent project.

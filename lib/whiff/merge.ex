@@ -2,17 +2,38 @@ defmodule Whiff.Merge do
   @moduledoc """
   Deterministic merge of Elixir plugin patches into a native `whiff/1` report.
 
-  ## Rules (v0.1)
+  Used by the plugin runner after `Whiff.Extractor` / `Whiff.Analyzer` callbacks.
+  Patches must be **string-keyed** maps of JSON-safe values (maps, lists, binaries,
+  numbers, booleans, `nil`). Atoms, structs, PIDs, ports, functions, and
+  references are rejected.
 
-  * Preserve native `whiff.schema` / version and core sections.
-  * Never erase native `security` risk/secret/personal_data fields, `integrity`,
-    `diagnostics`, or `embedded`.
-  * `embedded` patches are rejected.
-  * `metadata` / `format`: namespaced keys; collisions error unless override mode
-    allows the declared field.
-  * `content`: keywords de-duplicated in deterministic order; scalars native-wins
-    in `:augment`, plugin-wins in `:fallback`, declared fields in `:override`.
-  * Reject atoms, PIDs, structs, references; cap depth and string size.
+  ## Modes (`:mode`)
+
+  * `:augment` (default) — add missing fields; keep native scalars on conflict
+  * `:fallback` — used when native did not cover the format; plugin content
+    replaces native content scalars
+  * `:override` — replace only paths listed in `:override_fields`
+
+  ## Protected rules
+
+  * Cannot patch top-level `"whiff"`, `"integrity"`, or `"embedded"`
+  * Cannot replace native `"security"` keys `"risks"`, `"secrets"`, `"personal_data"`
+  * `"metadata"` / `"format"` keys are namespaced; collisions error unless
+    `:override` allows the path
+  * `"content.keywords"` lists are concatenated and de-duplicated
+  * Depth, string size, and map key count are capped
+
+  ## Example
+
+      iex> base = %{"content" => %{"title" => "native"}, "metadata" => %{}}
+      iex> patch = %{"content" => %{"title" => "plugin", "extra" => 1}, "metadata" => %{"myapp.x" => %{"v" => 1}}}
+      iex> {:ok, merged} = Whiff.Merge.merge(base, patch, mode: :augment)
+      iex> merged["content"]["title"]
+      "native"
+      iex> merged["content"]["extra"]
+      1
+      iex> merged["metadata"]["myapp.x"]
+      %{"v" => 1}
   """
 
   @max_depth 8
@@ -22,10 +43,57 @@ defmodule Whiff.Merge do
   @protected_top ~w(whiff integrity embedded)
   @protected_security_keys ~w(risks secrets personal_data)
 
+  @typedoc """
+  Merge strategy for conflicting keys.
+
+  ## Example
+
+      :augment
+  """
   @type mode :: :fallback | :augment | :override
 
   @doc """
-  Merge a plugin patch into `report`.
+  Merge a plugin `patch` into `report`.
+
+  ## Arguments
+
+  * `report` — string-keyed `whiff/1` map
+  * `patch` — string-keyed map of sections to merge
+  * `opts` — optional keywords:
+    * `:mode` — `t:mode/0` (default `:augment`)
+    * `:override_fields` — list of path strings or bare keys allowed under
+      `:override` (for example `["content.title"]` or `"title"`)
+    * `:plugin_id` — id recorded in provenance / conflict details (default `"plugin"`)
+    * `:provenance` — when `true`, record patched leaf paths under
+      `diagnostics.provenance`
+
+  ## Returns
+
+  * `{:ok, report}` — merged string-keyed map
+  * `{:error, %Whiff.Error{reason: :invalid_report}}` — bad shape, unsupported
+    terms, depth/size limits, or `"embedded"` patch
+  * `{:error, %Whiff.Error{reason: :conflict}}` — protected section or namespace
+    collision without a declared override
+
+  ## Examples
+
+      iex> {:ok, r} = Whiff.Merge.merge(%{"content" => %{"title" => "n"}}, %{"content" => %{"title" => "p"}}, mode: :fallback)
+      iex> r["content"]["title"]
+      "p"
+
+      iex> Whiff.Merge.merge(%{}, %{"embedded" => %{}}, [])
+      {:error, %Whiff.Error{reason: :invalid_report, message: "embedded patches are not allowed in v0.1", path: nil, details: %{}}}
+
+      iex> Whiff.Merge.merge(%{"whiff" => %{"schema" => "whiff/1"}}, %{"whiff" => %{}}, mode: :augment)
+      {:error, %Whiff.Error{reason: :conflict, message: "cannot patch protected section `whiff`", path: nil, details: %{}}}
+
+      iex> Whiff.Merge.merge("nope", %{}, [])
+      {:error, %Whiff.Error{reason: :invalid_report, message: "merge requires map report and patch", path: nil, details: %{}}}
+
+      iex> base = %{"metadata" => %{"native_key" => 1}}
+      iex> {:ok, r} = Whiff.Merge.merge(base, %{"metadata" => %{"native_key" => 2}}, mode: :override, override_fields: ["metadata.native_key"])
+      iex> r["metadata"]["native_key"]
+      2
   """
   @spec merge(map(), map(), keyword()) :: {:ok, map()} | {:error, Whiff.Error.t()}
   def merge(report, patch, opts \\ [])
@@ -131,7 +199,6 @@ defmodule Whiff.Merge do
   end
 
   defp merge_section(report, "security", value, mode, fields, id) when is_map(value) do
-    # Only allow appending diagnostics-like soft fields; never replace risks/secrets/personal_data
     forbidden = Map.keys(value) |> Enum.filter(&(&1 in @protected_security_keys))
 
     if forbidden != [] do
@@ -143,7 +210,6 @@ defmodule Whiff.Merge do
   end
 
   defp merge_section(report, "diagnostics", value, _mode, _fields, _id) when is_map(value) do
-    # Only append warnings / extractors via dedicated helpers; shallow merge non-destructive
     existing = Map.get(report, "diagnostics") || %{}
     warnings = List.wrap(existing["warnings"]) ++ List.wrap(value["warnings"])
     limits = List.wrap(existing["limits_hit"]) ++ List.wrap(value["limits_hit"])
@@ -217,11 +283,9 @@ defmodule Whiff.Merge do
         {:cont, {:ok, Map.put(acc, k, v)}}
 
       mode == :augment ->
-        # augment: native wins for existing scalars
         {:cont, {:ok, acc}}
 
       mode == :fallback ->
-        # fallback: plugin content replaces native (format was not covered)
         {:cont, {:ok, Map.put(acc, k, v)}}
 
       mode == :override and override_allowed?(fields, path, k) ->

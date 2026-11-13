@@ -7,7 +7,7 @@
 
 - `mix.exs`, `mix.lock`, `.formatter.exs`, `.gitignore`, `.tool-versions`
 - `lib/whiff.ex`, `lib/whiff/native.ex`, `lib/whiff/error.ex`, `lib/whiff/input.ex`, `lib/whiff/report.ex`, plus scaffolding for registry/extractor/analyzer/merge
-- `native/whiff_native/` — Cargo crate, DirtyCpu NIFs, `whiff` 0.6.0 (`common` only)
+- `native/whiff_native/` — Cargo crate, DirtyCpu NIFs, `whiff` 0.8.0 (`common` only)
 - `priv/schemas/whiff-1.schema.json`
 - `test/` fixtures + baseline extract tests
 - `LICENSE`, `CHANGELOG.md`

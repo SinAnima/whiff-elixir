@@ -2,46 +2,118 @@ defmodule Whiff do
   @moduledoc """
   Elixir wrapper around the Rust [whiff](https://github.com/baoulo/whiff) crate.
 
-  Returns idiomatic `{:ok, report}` / `{:error, %Whiff.Error{}}` results where
-  `report` is a **string-keyed** map conforming to schema `whiff/1`.
+  Non-bang functions return `{:ok, report}` or `{:error, %Whiff.Error{}}`.
+  Reports are **string-keyed** maps conforming to schema `whiff/1`.
+  Bang variants raise `%Whiff.Error{}`.
 
-  ## Examples
-
-      iex> is_binary(Whiff.schema_version())
-      true
-
-  Native identification/extraction is the default. Elixir extractors
+  Native identification and extraction run in the NIF. Elixir extractors
   (`Whiff.Extractor`) and analyzers (`Whiff.Analyzer`) run in BEAM processes
-  outside the NIF.
+  and merge patches via `Whiff.Merge`.
+
+  ## Quick start
+
+      iex> Whiff.schema_version()
+      "whiff/1"
+
+      iex> {:ok, report} = Whiff.extract("test/fixtures/hello.txt", hashes: :none)
+      iex> report["whiff"]["schema"]
+      "whiff/1"
   """
 
   alias Whiff.{Error, Input, Limiter, Native, Options, Registry, Report, Scratch}
 
+  @typedoc """
+  A decoded `whiff/1` report: string keys only.
+
+  ## Example
+
+      %{"whiff" => %{"schema" => "whiff/1"}, "identification" => %{"format" => "text"}}
+  """
   @type report :: %{optional(String.t()) => term()}
+
+  @typedoc """
+  Public result tuple for non-bang extract/LLM APIs.
+
+  ## Example
+
+      {:ok, %{"whiff" => %{"schema" => "whiff/1"}}}
+  """
   @type result :: {:ok, report()} | {:error, Error.t()}
 
-  @doc "Library version."
+  @doc """
+  Library version string from the application vsn.
+
+  ## Returns
+
+  A semver-like string such as `"0.4.0"`.
+
+  ## Examples
+
+      iex> Whiff.version() =~ ~r/^\\d+\\.\\d+\\.\\d+/
+      true
+  """
   @spec version() :: String.t()
   def version, do: project_version()
 
-  @doc "Report schema version (`whiff/1`)."
+  @doc """
+  Report schema version (`"whiff/1"`).
+
+  ## Examples
+
+      iex> Whiff.schema_version()
+      "whiff/1"
+  """
   @spec schema_version() :: String.t()
   def schema_version, do: Report.schema_version()
 
   @doc """
   Extract a `whiff/1` report from a filesystem path.
 
+  ## Arguments
+
+  * `path` — UTF-8 filesystem path
+  * `opts` — optional keywords (see below)
+
   ## Options
 
-  Native: `:profile`, `:hashes`, `:privacy`, `:only`, `:skip`, `:format`,
-  `:provenance`, `:limits`, `:tokens` (llm only).
+  Native:
 
-  Pipeline: `:mode` (`:fallback` | `:augment` | `:override`), `:extractors`,
-  `:analyzers`, `:strict`, `:plugin_timeout_ms`, `:override_fields`.
+  * `:profile` — extraction profile atom (for example `:standard`, `:minimal`)
+  * `:hashes` — hash selection (for example `:none`, `:all`)
+  * `:privacy` — `:strict` (default) or `:off` (also used for Elixir patches)
+  * `:only` / `:skip` — section filters
+  * `:format` / `:provenance` / `:limits` — forwarded to the native engine
+  * `:tokens` — LLM token budget (`llm/2` only)
 
-  Staging: `:stage` (`:never` | `:local`). When `:local`, the file is copied to
-  the configured scratch directory (`:whiff, :scratch_dir`) on the BEAM before
-  the DirtyCpu NIF opens it — useful for large files on slow/network storage.
+  Pipeline:
+
+  * `:mode` — `:fallback` | `:augment` | `:override` (merge strategy)
+  * `:extractors` / `:analyzers` — module lists (override app config)
+  * `:strict` — when `true`, plugin errors fail the call
+  * `:plugin_timeout_ms` — per-plugin task timeout
+  * `:override_fields` — paths allowed under `:override`
+
+  Staging:
+
+  * `:stage` — `:never` (default) or `:local`. When `:local`, the file is copied
+    to the configured scratch directory before the DirtyCpu NIF opens it.
+
+  ## Returns
+
+  * `{:ok, report}` — string-keyed `whiff/1` map
+  * `{:error, %Whiff.Error{}}` — see `t:Whiff.Error.reason/0` (`:enoent`,
+    `:invalid_option`, `:native_error`, plugin errors when `strict: true`, etc.)
+
+  Does not raise; use `extract!/2` for that.
+
+  ## Examples
+
+      iex> {:ok, report} = Whiff.extract("test/fixtures/hello.txt", hashes: :none)
+      iex> is_binary(report["identification"]["format"])
+      true
+
+      iex> Whiff.extract(123)
+      {:error, %Whiff.Error{reason: :unsupported_input, message: "path must be a binary", path: nil, details: %{}}}
   """
   @spec extract(Path.t(), keyword()) :: result()
   def extract(path, opts \\ [])
@@ -67,7 +139,28 @@ defmodule Whiff do
     {:error, Error.new(:unsupported_input, "path must be a binary")}
   end
 
-  @doc "Same as `extract/2` but raises `Whiff.Error`."
+  @doc """
+  Same as `extract/2`, but returns the report or raises `%Whiff.Error{}`.
+
+  ## Arguments
+
+  * `path` — UTF-8 filesystem path
+  * `opts` — same as `extract/2`
+
+  ## Returns
+
+  A string-keyed report map.
+
+  ## Raises
+
+  `%Whiff.Error{}` when `extract/2` would return `{:error, err}`.
+
+  ## Examples
+
+      iex> report = Whiff.extract!("test/fixtures/hello.txt", hashes: :none)
+      iex> report["whiff"]["schema"]
+      "whiff/1"
+  """
   @spec extract!(Path.t(), keyword()) :: report()
   def extract!(path, opts \\ []) do
     case extract(path, opts) do
@@ -77,9 +170,30 @@ defmodule Whiff do
   end
 
   @doc """
-  Extract from in-memory bytes.
+  Extract a `whiff/1` report from in-memory bytes.
 
-  Pass `name:` (filename) to aid detection.
+  ## Arguments
+
+  * `bytes` — binary payload
+  * `opts` — same as `extract/2`, plus:
+    * `:name` / `:filename` — basename for detection (recommended)
+    * `:mime` — optional MIME hint for `Whiff.Input`
+
+  ## Returns
+
+  * `{:ok, report}` — string-keyed map
+  * `{:error, %Whiff.Error{}}` — `:unsupported_input`, `:invalid_option`,
+    native failures, or strict plugin failures
+
+  ## Examples
+
+      iex> bytes = File.read!("test/fixtures/hello.txt")
+      iex> {:ok, report} = Whiff.extract_binary(bytes, name: "hello.txt", hashes: :none)
+      iex> report["whiff"]["schema"]
+      "whiff/1"
+
+      iex> Whiff.extract_binary(123)
+      {:error, %Whiff.Error{reason: :unsupported_input, message: "expected a binary", path: nil, details: %{}}}
   """
   @spec extract_binary(binary(), keyword()) :: result()
   def extract_binary(bytes, opts \\ [])
@@ -97,7 +211,24 @@ defmodule Whiff do
     {:error, Error.new(:unsupported_input, "expected a binary")}
   end
 
-  @doc "Same as `extract_binary/2` but raises `Whiff.Error`."
+  @doc """
+  Same as `extract_binary/2`, but returns the report or raises `%Whiff.Error{}`.
+
+  ## Arguments
+
+  * `bytes` — binary payload
+  * `opts` — same as `extract_binary/2`
+
+  ## Raises
+
+  `%Whiff.Error{}` on failure.
+
+  ## Examples
+
+      iex> bytes = File.read!("test/fixtures/hello.txt")
+      iex> Whiff.extract_binary!(bytes, name: "hello.txt", hashes: :none)["whiff"]["schema"]
+      "whiff/1"
+  """
   @spec extract_binary!(binary(), keyword()) :: report()
   def extract_binary!(bytes, opts \\ []) do
     case extract_binary(bytes, opts) do
@@ -107,12 +238,27 @@ defmodule Whiff do
   end
 
   @doc """
-  Compact LLM projection for a path (`Report::llm_view`).
+  Compact LLM projection for a path (`Report::llm_view` in upstream).
 
-  Default token budget: `800` (override with `tokens:`).
+  ## Arguments
 
-  Accepts the same staging option as `extract/2`: `stage: :local` copies to
-  scratch before the DirtyCpu NIF (see Configuration in the README).
+  * `path` — UTF-8 filesystem path
+  * `opts` — native/pipeline options; `:tokens` defaults to `800`. Accepts
+    `stage: :local` like `extract/2`.
+
+  ## Returns
+
+  * `{:ok, compact}` — string-keyed projection map
+  * `{:error, %Whiff.Error{}}` — path/option/native failures
+
+  ## Examples
+
+      iex> {:ok, compact} = Whiff.llm("test/fixtures/hello.txt", tokens: 200, hashes: :none)
+      iex> is_map(compact)
+      true
+
+      iex> Whiff.llm(123)
+      {:error, %Whiff.Error{reason: :unsupported_input, message: "path must be a binary", path: nil, details: %{}}}
   """
   @spec llm(Path.t(), keyword()) :: result()
   def llm(path, opts \\ [])
@@ -133,7 +279,14 @@ defmodule Whiff do
 
   def llm(_, _), do: {:error, Error.new(:unsupported_input, "path must be a binary")}
 
-  @doc "Same as `llm/2` but raises `Whiff.Error`."
+  @doc """
+  Same as `llm/2`, but returns the projection or raises `%Whiff.Error{}`.
+
+  ## Examples
+
+      iex> is_map(Whiff.llm!("test/fixtures/hello.txt", tokens: 200, hashes: :none))
+      true
+  """
   @spec llm!(Path.t(), keyword()) :: report()
   def llm!(path, opts \\ []) do
     case llm(path, opts) do
@@ -145,10 +298,29 @@ defmodule Whiff do
   @doc """
   Extract many paths with bounded concurrency.
 
-  Returns a list of `{path, result}` in input order.
+  ## Arguments
 
-  Options: `:max_concurrency` (default 4), `:on_error` (`:collect` | `:halt`).
-  Other options are forwarded to `extract/2`.
+  * `paths` — list of UTF-8 path strings
+  * `opts` — forwarded to `extract/2`, plus:
+    * `:max_concurrency` — positive integer (default `4`)
+    * `:on_error` — `:collect` (default) keeps going; `:halt` stops and returns
+      the first error with `:partial` results in `err.details`
+
+  ## Returns
+
+  * `{:ok, [{path, result}, ...]}` — one pair per input path, in order
+    (`result` is `t:result/0`)
+  * `{:error, %Whiff.Error{}}` — invalid args, invalid options, or `:halt` stop
+
+  ## Examples
+
+      iex> path = "test/fixtures/hello.txt"
+      iex> {:ok, pairs} = Whiff.extract_many([path], hashes: :none, max_concurrency: 1)
+      iex> match?([{^path, {:ok, _}}], pairs)
+      true
+
+      iex> Whiff.extract_many("nope")
+      {:error, %Whiff.Error{reason: :unsupported_input, message: "paths must be a list of binaries", path: nil, details: %{}}}
   """
   @spec extract_many([Path.t()], keyword()) ::
           {:ok, [{Path.t(), result()}]} | {:error, Error.t()}
@@ -255,10 +427,9 @@ defmodule Whiff do
   defp ok_input(%Input{} = input), do: {:ok, input}
   defp ok_input({:error, _} = err), do: err
 
-  # Mix.Project may be unavailable at runtime in a release — fall back.
   defp project_version do
     Application.spec(:whiff, :vsn) |> to_string()
   rescue
-    _ -> "0.3.0"
+    _ -> "0.4.0"
   end
 end

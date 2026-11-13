@@ -1,4 +1,4 @@
-//! Stage 0 probe: pin whiff 0.6.0 and exercise Engine / llm_view / errors.
+//! Stage 0 probe: pin whiff 0.8.0 and exercise Engine / llm_view / errors.
 
 use std::env;
 use std::path::PathBuf;
@@ -17,12 +17,12 @@ fn main() -> ExitCode {
     println!("enabled features={:?}", whiff::enabled_features());
     println!("extracting {}", path.display());
 
+    let mut hashes = Hashes::NONE;
+    hashes.sha256 = true;
+
     let engine = Engine::builder()
         .profile(Profile::Standard)
-        .hashes(Hashes {
-            sha256: true,
-            blake3: false,
-        })
+        .hashes(hashes)
         .privacy(Privacy::Strict)
         .provenance(false)
         .build();
@@ -49,6 +49,7 @@ fn main() -> ExitCode {
                     println!("--- missing path ---");
                     println!("path={} kind={:?} message={source}", p.display(), source.kind());
                 }
+                Err(other) => println!("unexpected error for missing path: {other}"),
                 Ok(_) => println!("unexpected ok for missing path"),
             }
 
