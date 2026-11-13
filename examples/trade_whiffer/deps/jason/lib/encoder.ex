@@ -98,6 +98,7 @@ defimpl Jason.Encoder, for: Any do
   defp generated_var(:_) do
     {:__, [generated: true], __MODULE__.Underscore}
   end
+
   defp generated_var(name) do
     {name, [generated: true], __MODULE__}
   end
@@ -148,9 +149,8 @@ defimpl Jason.Encoder, for: Any do
 
           error_keys ->
             raise ArgumentError,
-              "`:only` specified keys (#{inspect(error_keys)}) that are not defined in defstruct: " <>
-                "#{inspect(fields -- [:__struct__])}"
-
+                  "`:only` specified keys (#{inspect(error_keys)}) that are not defined in defstruct: " <>
+                    "#{inspect(fields -- [:__struct__])}"
         end
 
       except = Keyword.get(opts, :except) ->
@@ -160,9 +160,8 @@ defimpl Jason.Encoder, for: Any do
 
           error_keys ->
             raise ArgumentError,
-              "`:except` specified keys (#{inspect(error_keys)}) that are not defined in defstruct: " <>
-                "#{inspect(fields -- [:__struct__])}"
-
+                  "`:except` specified keys (#{inspect(error_keys)}) that are not defined in defstruct: " <>
+                    "#{inspect(fields -- [:__struct__])}"
         end
 
       true ->

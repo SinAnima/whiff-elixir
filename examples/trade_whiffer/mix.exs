@@ -23,4 +23,3 @@ defmodule TradeWhiffer.MixProject do
     ]
   end
 end
-

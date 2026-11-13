@@ -1133,9 +1133,7 @@ defmodule RustlerPrecompiled do
            {:file, :ok} <- {:file, File.write(path, body)} do
         checksum = Base.encode16(hash, case: :lower)
 
-        Logger.debug(
-          "NIF cached at #{path} with checksum #{inspect(checksum)} (#{@checksum_algo})"
-        )
+        Logger.debug("NIF cached at #{path} with checksum #{inspect(checksum)} (#{@checksum_algo})")
 
         [
           %{
