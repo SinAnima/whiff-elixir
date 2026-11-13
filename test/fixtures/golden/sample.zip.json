@@ -1,0 +1,254 @@
+{
+ "content": {},
+ "diagnostics": {
+  "elapsed_ms": 6.876,
+  "extractors": [
+   {
+    "id": "archive.zip",
+    "ms": 0.036,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "meta.mwg",
+    "ms": 0.0,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.language",
+    "ms": 0.0,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.excerpt",
+    "ms": 0.0,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.keywords",
+    "ms": 0.03,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.summary",
+    "ms": 0.0,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "temporal.range",
+    "ms": 0.002,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "privacy.scan",
+    "ms": 0.036,
+    "status": "ok",
+    "version": 1
+   }
+  ],
+  "truncated": false
+ },
+ "embedded": [
+  {
+   "content": {
+    "excerpt": "hi"
+   },
+   "diagnostics": {
+    "elapsed_ms": 4.4,
+    "extractors": [
+     {
+      "id": "text.plain",
+      "ms": 0.912,
+      "status": "ok",
+      "version": 1
+     },
+     {
+      "id": "meta.mwg",
+      "ms": 0.002,
+      "status": "ok",
+      "version": 1
+     },
+     {
+      "id": "text.language",
+      "ms": 0.0,
+      "status": "ok",
+      "version": 1
+     },
+     {
+      "id": "text.excerpt",
+      "ms": 0.001,
+      "status": "ok",
+      "version": 1
+     },
+     {
+      "id": "text.keywords",
+      "ms": 0.039,
+      "status": "ok",
+      "version": 1
+     },
+     {
+      "id": "text.summary",
+      "ms": 0.0,
+      "status": "ok",
+      "version": 1
+     },
+     {
+      "id": "temporal.range",
+      "ms": 0.001,
+      "status": "ok",
+      "version": 1
+     },
+     {
+      "id": "privacy.scan",
+      "ms": 3.382,
+      "status": "ok",
+      "version": 1
+     }
+    ],
+    "truncated": false
+   },
+   "format": {
+    "text": {
+     "paragraphs": 1
+    }
+   },
+   "identification": {
+    "confidence": 0.35,
+    "detected_by": "extension",
+    "encoding": "us-ascii",
+    "extension_matches": true,
+    "extractor": "text.plain",
+    "family": "text.plain",
+    "format": "text",
+    "mime": "text/plain",
+    "name": "Plain text"
+   },
+   "integrity": {
+    "blake3": "0b8b60248fad7ac6dfac221b7e01a8b91c772421a15b387dd1fb2d6a94aee438",
+    "sha256": "98ea6e4f216f2fb4b69fff9b3a44842c38686ca685f3f55dc48c5d3fb1107be4"
+   },
+   "metadata": {},
+   "physical": {
+    "entropy": 1.585,
+    "entropy_scope": "file",
+    "size_bytes": 3,
+    "text": {
+     "blank_lines": 0,
+     "bom": false,
+     "bytes": 3,
+     "chars": 3,
+     "line_endings": "lf",
+     "lines": 1,
+     "max_line_length": 2,
+     "words": 1
+    }
+   },
+   "rights": {},
+   "security": {},
+   "source": {
+    "extension": "txt",
+    "name": "hi.txt",
+    "stem": "hi"
+   },
+   "system": {
+    "kind": "memory",
+    "size_bytes": 3
+   },
+   "temporal": {
+    "filesystem": {}
+   },
+   "whiff": {
+    "profile": "standard",
+    "schema": "whiff/1",
+    "version": "0.8.0"
+   }
+  }
+ ],
+ "format": {
+  "zip": {
+   "compressed_bytes": 3,
+   "created_on": "Unix",
+   "entries": [
+    {
+     "mode": "644",
+     "modified": "2026-11-13T02:53:39Z",
+     "path": "hi.txt",
+     "size_bytes": 3
+    }
+   ],
+   "file_types": {
+    "txt": 1
+   },
+   "files": 1,
+   "methods": {
+    "stored": 1
+   },
+   "modified_range": [
+    "2026-11-13T02:53:39Z",
+    "2026-11-13T02:53:39Z"
+   ],
+   "top_level": [
+    "hi.txt"
+   ]
+  }
+ },
+ "identification": {
+  "confidence": 0.55,
+  "detected_by": "sniff",
+  "extension_matches": true,
+  "extractor": "archive.zip",
+  "family": "archive",
+  "format": "zip",
+  "mime": "application/zip",
+  "name": "ZIP archive"
+ },
+ "integrity": {
+  "blake3": "2e60e0eff99293ed59433dad6cdb898aa338c0f1ce62380283cf5c22be0083fe",
+  "sha256": "237cbea97192952479001f09124f0f419658226e9d14839b93c800eab967392e"
+ },
+ "metadata": {},
+ "physical": {
+  "container": {
+   "entries": 1,
+   "ratio": 0.01818181818181818,
+   "uncompressed_bytes": 3
+  },
+  "entropy": 3.757,
+  "entropy_scope": "file",
+  "size_bytes": 165
+ },
+ "rights": {},
+ "security": {},
+ "source": {
+  "extension": "zip",
+  "name": "sample.zip",
+  "stem": "sample"
+ },
+ "system": {
+  "kind": "regular",
+  "size_bytes": 165
+ },
+ "temporal": {
+  "content": [
+   {
+    "field": "modified",
+    "source": "archive.zip",
+    "tz_known": true,
+    "value": "2026-11-13T02:53:39Z"
+   }
+  ],
+  "earliest": "2026-11-13T02:53:39Z",
+  "latest": "2026-11-13T02:53:39Z"
+ },
+ "whiff": {
+  "profile": "standard",
+  "schema": "whiff/1",
+  "version": "0.8.0"
+ }
+}

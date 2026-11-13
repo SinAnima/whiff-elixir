@@ -1,0 +1,112 @@
+{
+ "content": {
+  "excerpt": "Hello from whiff."
+ },
+ "diagnostics": {
+  "elapsed_ms": 7.533,
+  "extractors": [
+   {
+    "id": "text.plain",
+    "ms": 1.119,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "meta.mwg",
+    "ms": 0.002,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.language",
+    "ms": 0.001,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.excerpt",
+    "ms": 0.001,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.keywords",
+    "ms": 0.048,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.summary",
+    "ms": 0.0,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "temporal.range",
+    "ms": 0.002,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "privacy.scan",
+    "ms": 4.368,
+    "status": "ok",
+    "version": 1
+   }
+  ],
+  "truncated": false
+ },
+ "format": {
+  "text": {
+   "paragraphs": 1
+  }
+ },
+ "identification": {
+  "confidence": 0.35,
+  "detected_by": "extension",
+  "encoding": "us-ascii",
+  "extension_matches": true,
+  "extractor": "text.plain",
+  "family": "text.plain",
+  "format": "text",
+  "mime": "text/plain",
+  "name": "Plain text"
+ },
+ "integrity": {
+  "blake3": "693e194acad204a907d10fa9095ba11020e912744b8a2ce13f0d43c326708536",
+  "sha256": "0a84e13d0212782bf920b9289475cddd633dc29e06145c119b86d8a3df111d18"
+ },
+ "metadata": {},
+ "physical": {
+  "entropy": 3.572,
+  "entropy_scope": "file",
+  "size_bytes": 18,
+  "text": {
+   "blank_lines": 0,
+   "bom": false,
+   "bytes": 18,
+   "chars": 18,
+   "line_endings": "lf",
+   "lines": 1,
+   "max_line_length": 17,
+   "words": 3
+  }
+ },
+ "rights": {},
+ "security": {},
+ "source": {
+  "extension": "txt",
+  "name": "hello.txt",
+  "stem": "hello"
+ },
+ "system": {
+  "kind": "regular",
+  "size_bytes": 18
+ },
+ "temporal": {},
+ "whiff": {
+  "profile": "standard",
+  "schema": "whiff/1",
+  "version": "0.8.0"
+ }
+}

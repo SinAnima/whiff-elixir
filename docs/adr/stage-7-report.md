@@ -6,7 +6,7 @@
 ## Files
 
 - `lib/whiff/native.ex` — `RustlerPrecompiled` + `force_build` for `:dev`/`:test` / `WHIFF_BUILD=1`
-- `.github/workflows/ci.yml` — ubuntu-22.04 + macos-14 mandatory; Windows best-effort
+- `.github/workflows/ci.yml` — ubuntu-22.04 + macos-14 mandatory; Windows best-effort (macos-14 later replaced by macos-15)
 - `examples/trade_whiffer/` — standalone path-dep Whiffer package
 - `docs/adr/0001-baseline.md`, stage reports, `docs/hex-publish-checklist.md`
 - `README.md`, `CHANGELOG.md`, ExDoc extras wiring in `mix.exs`

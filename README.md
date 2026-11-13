@@ -1,414 +1,300 @@
 # whiff
 
-**whiff** is an Elixir library that sniffs a file (or in-memory bytes) and returns one structured **`whiff/1`** report: what the file is, how it was identified, hashes, rights/security signals, content excerpts, and format-specific metadata — as a **string-keyed** map you can pattern-match and pipe through the rest of your app.
+whiff identifies a file or a binary and returns a `whiff/1` report as a map
+with string keys: format, hashes, security and rights signals, content, and
+format-specific metadata.
 
-It wraps the Rust [whiff](https://github.com/baoulo/whiff) crate (`0.6.0`) through a Rustler NIF, and adds first-class **Elixir extractors** (“Whiffers”) and **analyzers** that run in BEAM processes *outside* the native engine.
+It wraps the Rust [whiff](https://github.com/baoulo/whiff) crate (0.8.0)
+through a Rustler NIF. Elixir extractors and analyzers can add fields to the
+native report; they run in isolated BEAM processes after native extraction.
 
-## What you get
+## Report shape
 
-A typical report looks like this (shape abbreviated):
+Abbreviated:
 
 ```elixir
 %{
-  "whiff" => %{"schema" => "whiff/1", "version" => "0.6.0", "profile" => "standard"},
-  "identification" => %{
-    "format" => "pdf",
-    "mime" => "application/pdf",
-    "name" => "PDF document",
-    "extractor" => "..."
-  },
+  "whiff" => %{"schema" => "whiff/1", "version" => "0.8.0", "profile" => "standard"},
+  "source" => %{"path" => "invoice.pdf", "name" => "invoice.pdf", "extension" => "pdf"},
+  "identification" => %{"format" => "pdf", "mime" => "application/pdf", "extractor" => "doc.pdf"},
   "integrity" => %{"sha256" => "...", "blake3" => "..."},
-  "security" => %{"risks" => [...], "secrets" => [...], "personal_data" => [...]},
+  "security" => %{"risks" => [...], "secrets" => %{...}, "personal_data" => %{...}},
   "content" => %{"title" => "...", "excerpt" => "...", "keywords" => [...]},
-  "metadata" => %{...},   # EXIF / XMP / … when present
-  "format" => %{...},     # format-specific technical details
-  "embedded" => [...],    # children of archives/containers
-  "diagnostics" => %{"extractors" => [...], "truncated" => false, ...}
+  "metadata" => %{...},
+  "format" => %{...},
+  "embedded" => [...],
+  "diagnostics" => %{"extractors" => [...], "warnings" => [...], "truncated" => false}
 }
 ```
 
-Empty optional fields are omitted; core sections stay present. Schema: `whiff/1` (vendored at `priv/schemas/whiff-1.schema.json`).
+Empty optional fields are omitted. The schema is vendored at
+`priv/schemas/whiff-1.schema.json`.
 
-Native extraction is the default. Elixir plugins can **fallback** for proprietary formats, **augment** a native report with domain fields, or **override** declared fields — with deterministic merge rules that refuse to silently wipe security/integrity/diagnostics.
+## Supported formats
 
-## Supported file types
-
-Format coverage comes from upstream Rust **whiff**. The authoritative list of formats, what each extractor pulls, and which Cargo feature enables it is here:
-
-**[whiff: metadata extracted per file format](https://github.com/baoulo/whiff/blob/main/docs/metadata-extracted.md)**
-
-This Elixir package ships the NIF with the **`common`** feature set (text, web, data, code, images, documents, email, audio/video, archives, packages, executables, certificates, SQLite, fonts, …). Specialist collections (`geo`, `science`, `data`, `cad`, `forensics`, `games`, or `full`) are documented upstream but are **not** enabled in this wrapper (through 0.3.x).
-
-Anything outside native coverage can still be handled with an Elixir `Whiff.Extractor` (see examples below).
-
-## Good use cases
-
-| Use case | Why whiff fits |
-|---|---|
-| **Upload / ingest gates** | Identify MIME/format, refuse surprising types, record hashes before storage |
-| **Security / compliance triage** | Surface risks, secrets, and personal-data signals early in a pipeline |
-| **Document / media catalogs** | Title, keywords, EXIF/rights, container children without ad-hoc parsers per type |
-| **LLM / RAG prep** | `Whiff.llm/2` returns a compact, token-budgeted projection of the same report |
-| **Proprietary formats** | Ship a small Elixir Whiffer for `.trade` / bank blobs while keeping native coverage for PDF/JPEG/ZIP |
-| **Phoenix / LiveView uploads** | `extract_binary/2` on Plug upload bytes with `name:` for detection |
-| **Batch jobs** | `extract_many/2` with bounded concurrency over a list of paths |
-| **Forensic-ish inventory** | Profile/limits knobs, nested archives, Unicode names — same report shape everywhere |
-
-Whiff is a **library**, not a service: no database, no HTTP API of its own. Call it from workers, controllers, or Mix tasks.
+Format coverage comes from upstream whiff. See
+[metadata extracted per file format](https://github.com/baoulo/whiff/blob/main/docs/metadata-extracted.md).
+This package builds the NIF with the `common` feature set only. The upstream
+`geo`, `science`, `data`, `cad`, `forensics`, `games`, and `full` features are
+not enabled. Other formats can be handled with an Elixir `Whiff.Extractor`.
 
 ## Install
 
 ```elixir
 def deps do
-  [
-    {:whiff, "~> 0.3.0"}
-  ]
+  [{:whiff, "~> 0.4.0"}]
 end
 ```
 
-### Native NIF
-
-- **Dev / test:** source-builds by default (`force_build`, or set `WHIFF_BUILD=1`). Needs Rust **1.91+**.
-- **Prod / Hex:** precompiled NIFs from GitHub Releases. Tagging `vX.Y.Z` runs [`.github/workflows/release.yml`](.github/workflows/release.yml) (build artifacts → checksum → Hex publish).
+Precompiled NIFs are downloaded from GitHub Releases for the targets listed
+under [Platform support](#platform-support). To build from source instead,
+set `WHIFF_BUILD=1` and install Rust 1.91 or later. Source builds are the
+default in `:dev` and `:test`.
 
 ## Configuration
 
-Set in `config/config.exs` (or runtime config). All keys are optional.
+All keys are optional. The values shown are the defaults.
 
 ```elixir
 config :whiff,
-  # Default Elixir plugins (merged with per-call :extractors / :analyzers)
+  # Plugins used when a call does not pass :extractors / :analyzers.
+  # A per-call list replaces these lists.
   extractors: [],
   analyzers: [],
-
-  # Max concurrent DirtyCpu NIF calls (ETS semaphore; default 8, max 128)
+  # Concurrent native calls (1..128).
   native_max_concurrency: 8,
-
-  # Scratch staging for `stage: :local` (see below)
-  scratch_dir: "/var/cache/whiff",     # nil → System.tmp_dir!()/whiff-scratch
-  scratch_max_bytes: 1_073_741_824     # refuse staging above this size (1 GiB)
+  # How long a call waits for a native slot before returning
+  # {:error, %Whiff.Error{reason: :overloaded}} (ms).
+  native_wait_ms: 60_000,
+  # Scratch directory for stage: :local (default: System.tmp_dir!()/whiff-scratch).
+  scratch_dir: nil,
+  # Largest file stage: :local will copy (bytes).
+  scratch_max_bytes: 1_073_741_824
 ```
 
-| Key | Default | Purpose |
-|---|---|---|
-| `:extractors` | `[]` | Modules implementing `Whiff.Extractor` |
-| `:analyzers` | `[]` | Modules implementing `Whiff.Analyzer` |
-| `:native_max_concurrency` | `8` | Cap concurrent native extracts / LLM path calls |
-| `:scratch_dir` | tmp `whiff-scratch` | Destination for `stage: :local` copies |
-| `:scratch_max_bytes` | `1_073_741_824` | Max file size allowed to stage |
+## Usage
 
-### Slow / network filesystems (`stage: :local`)
-
-Path extract (`Whiff.extract/2`, `Whiff.llm/2`) opens and reads the file **inside** a DirtyCpu NIF. On NFS or other high-latency mounts that can pin DirtyCpu threads waiting on I/O.
-
-**Large files on slow storage** — copy to local scratch on the BEAM first, then open the scratch path in the NIF (still streamed / limit-aware; not a full `extract_binary`):
+### Extract a file
 
 ```elixir
-# config/runtime.exs (or config.exs)
-config :whiff,
-  scratch_dir: "/var/cache/whiff",
-  scratch_max_bytes: 4 * 1024 * 1024 * 1024
+{:ok, report} = Whiff.extract("invoice.pdf")
+report["identification"]["format"]
+#=> "pdf"
+```
 
-# call site
-{:ok, report} =
-  Whiff.extract("/mnt/nfs/ingest/huge.zip",
-    stage: :local,
-    profile: :standard,
-    privacy: :strict,
+`extract/2` returns `{:ok, report}` for any file it can inspect, including
+corrupt or unreadable ones. Problems inside the file are listed in
+`report["diagnostics"]`. It returns `{:error, %Whiff.Error{}}` when the path
+cannot be inspected or an option is invalid:
+
+```elixir
+case Whiff.extract(path) do
+  {:ok, report} -> {:ok, report}
+  {:error, %Whiff.Error{reason: :enoent}} -> :missing
+  {:error, %Whiff.Error{reason: :eacces}} -> :denied
+  {:error, %Whiff.Error{reason: :invalid_option, message: message}} -> {:bad_options, message}
+  {:error, %Whiff.Error{} = err} -> {:error, err}
+end
+```
+
+Bang variants (`extract!/2`, `extract_binary!/2`, `llm!/2`) raise the same
+`%Whiff.Error{}`.
+
+### Extract bytes
+
+```elixir
+{:ok, report} = Whiff.extract_binary(bytes, name: "invoice.pdf", hashes: [:sha256])
+```
+
+`:name` drives extension-based detection and `source.name`. Without it,
+detection uses content only.
+
+### Uploads
+
+`Plug.Upload` temporary files have no extension, so pass the client file
+name. For small uploads:
+
+```elixir
+def inspect_upload(%Plug.Upload{path: path, filename: filename}) do
+  with {:ok, bytes} <- File.read(path),
+       {:ok, report} <- Whiff.extract_binary(bytes, name: filename) do
+    {:ok, report["identification"]["format"], get_in(report, ["integrity", "sha256"])}
+  end
+end
+```
+
+### LLM context
+
+```elixir
+{:ok, view} = Whiff.llm("contract.pdf", tokens: 800)
+```
+
+`llm/2` returns upstream's `Report::llm_view` projection. Elixir extractors
+and analyzers do not run for it.
+
+### Batches
+
+```elixir
+{:ok, results} =
+  Whiff.extract_many(Path.wildcard("inbox/**/*"),
+    max_concurrency: 4,
+    timeout: 120_000,
+    profile: :minimal,
     hashes: :none
   )
 
-{:ok, compact} =
-  Whiff.llm("/mnt/nfs/docs/msa.pdf", stage: :local, tokens: 800)
+for {path, {:ok, report}} <- results, do: {path, report["identification"]["format"]}
 ```
 
-Staging keeps the original basename under a unique job directory, then deletes it when the call finishes. Files larger than `:scratch_max_bytes` return `{:error, %Whiff.Error{reason: :invalid_option}}`.
+Each path runs in its own unlinked task. Results keep input order. With
+`on_error: :halt` the first error is returned, with the completed pairs in
+`err.details.partial`.
 
-Default is `stage: :never` (direct path open). Mount tmpfs at `scratch_dir` if you want RAM-backed scratch without loading the whole file into the BEAM.
+### Slow or network filesystems
 
-**Small uploads already in memory** — prefer `Whiff.extract_binary/2` (no path I/O in the NIF):
+Path extraction reads the file inside a DirtyCpu NIF. On NFS or similar
+mounts a slow read holds a DirtyCpu thread. `stage: :local` copies the file
+to `:scratch_dir` on the BEAM first:
+
+```elixir
+{:ok, report} = Whiff.extract("/mnt/nfs/ingest/archive.zip", stage: :local)
+```
+
+The copy is made in a private (0700) directory with a random name and is
+deleted after the call. The report still describes the original file:
+`source.path` and filesystem fields are rewritten from the original. Times
+are at second precision, and fields Elixir cannot read (birth time, ACLs,
+xattrs, owner names, allocated size) are omitted; a `diagnostics.warnings`
+entry says so. Files over `:scratch_max_bytes` return `:invalid_option`.
+
+## Options
+
+Each function rejects options it does not use.
+
+| Option | Values | Default | Functions |
+|---|---|---|---|
+| `profile:` | `:minimal`, `:standard`, `:full`, `:llm` | `:standard` | all |
+| `hashes:` | `:all`, `:none`, or a list of `:sha256` / `:blake3` | `:all` | all |
+| `privacy:` | `:strict`, `:off` | `:strict` | all |
+| `only:` / `skip:` | extractor ids or groups, for example `["text.keywords"]` | none | all |
+| `format:` | format id to force, for example `"pdf"` | detect | all |
+| `provenance:` | record which extractor set each field | `false` | all |
+| `limits:` | see `Whiff` module docs for keys and ranges | profile limits | all |
+| `stage:` | `:never`, `:local` | `:never` | `extract`, `llm`, `extract_many` |
+| `name:` / `filename:` / `mime:` | strings | none | `extract_binary` |
+| `tokens:` | 1..100_000 | `800` | `llm` |
+| `mode:` | `:fallback`, `:augment`, `:override` | `:fallback` | `extract`, `extract_binary`, `extract_many` |
+| `extractors:` / `analyzers:` | behaviour modules | app config | same |
+| `strict:` | plugin failure returns `{:error, _}` | `false` | same |
+| `plugin_timeout_ms:` | 1..600_000 | `5000` | same |
+| `override_fields:` | dotted paths, for example `["content.title"]` | `[]` | same |
+| `max_concurrency:` / `on_error:` / `timeout:` | see `Whiff.extract_many/2` | `4` / `:collect` / `300_000` | `extract_many` |
+
+Privacy: `:strict` reduces personal data in structured fields to counts and
+scrubs Elixir plugin patches with `Whiff.Privacy`. Upstream redacts secrets
+and the text excerpt in both modes. `:off` lists personal data as found and
+passes plugin patches through unchanged.
+
+## Elixir extractors and analyzers
+
+An extractor implements `Whiff.Extractor`; an analyzer implements
+`Whiff.Analyzer`. Both return a patch that `Whiff.Merge` merges into the
+report.
+
+| Mode | When an extractor runs | Existing native values |
+|---|---|---|
+| `:fallback` | only if native extraction did not cover the file and could read it | kept, except `content.*` |
+| `:augment` | whenever `supports?/2` returns `true` | kept |
+| `:override` | whenever `supports?/2` returns `true` | replaced for paths in `override_fields` |
+
+Merge rules that hold in every mode:
+
+- `whiff`, `integrity`, and `embedded` cannot be patched.
+- `diagnostics` accepts only `warnings`. Plugin runs are recorded by the
+  pipeline in `diagnostics.extractors`.
+- `security.risks` entries are appended with `source: "elixir:<id>"`; other
+  existing `security` values are never replaced.
+- `metadata` and `format` keys are namespaces (`"myapp.trade"`); an existing
+  namespace is a conflict unless declared in `override_fields`.
+- A value written by one plugin cannot be replaced by another plugin unless
+  declared.
+- Patches are limited in depth, size, and value types.
+
+A failed plugin (raise, exit, timeout, invalid patch, conflict) is recorded in
+`diagnostics.extractors` with `"status" => "error"`, and the call still
+returns `{:ok, report}`. With `strict: true` the call returns the error.
 
 ```elixir
 {:ok, report} =
-  Whiff.extract_binary(upload_bytes, name: upload.filename, privacy: :strict)
+  Whiff.extract("positions/2026-10-28.trade",
+    extractors: [MyApp.TradeWhiffer],
+    analyzers: [MyApp.SensitivityAnalyzer]
+  )
+
+report["format"]["myapp.trade"]
 ```
 
-### Native concurrency limiter
+See the `Whiff.Extractor` and `Whiff.Analyzer` docs for complete modules, and
+[`examples/trade_whiffer`](examples/trade_whiffer/README.md) for a separate
+package that registers an extractor.
 
-Concurrent NIF work is bounded by `:native_max_concurrency`. If a caller waits longer than ~60s for a slot, acquisition **fail-opens** (runs anyway) **without** corrupting the in-flight counter — only successful acquires are released.
+## Concurrency and limits
+
+- Native calls are bounded by `:native_max_concurrency`. A call that waits
+  longer than `:native_wait_ms` returns `:overloaded`. A process that exits
+  while holding a slot releases it.
+- Native `limits` apply to the Rust engine only. Plugin callbacks use
+  `plugin_timeout_ms`.
+- A native `file_timeout` can leave a worker thread running after the call
+  returns. BEAM timeouts cannot stop native work.
 
 ## Requirements
 
-| Piece | Version |
+| Component | Version |
 |---|---|
-| Elixir | `~> 1.18` |
-| OTP | 26+ (CI uses 27) |
-| Rust (source / force build) | **1.91+** |
-| Hex [Rustler](https://hex.pm/packages/rustler) | **`~> 0.38`** |
-
-Rustler **0.39** is on crates.io but **not on Hex** as of 2026-10-28; this package pins **`~> 0.38`**.
+| Elixir | 1.18 or later |
+| OTP | 26 or later (CI tests 26 and 27) |
+| Rust, for source builds | 1.91 or later |
+| Rustler (Hex) | `~> 0.38` |
 
 ### Platform support
 
 | Target | Status |
 |---|---|
-| `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin` | Mandatory CI |
-| `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin` | Precompiled / best-effort |
-| `x86_64-pc-windows-msvc` | Best-effort |
-| musl / static Linux | Deferred (not in 0.3.x) |
-
-## Examples
-
-### Identify an uploaded file and gate storage
-
-```elixir
-def accept_upload(%Plug.Upload{path: path, filename: name}) do
-  # Plug already wrote a local temp file — no staging needed.
-  case Whiff.extract(path, profile: :standard, privacy: :strict) do
-    {:ok, report} ->
-      format = report["identification"]["format"]
-      mime = report["identification"]["mime"]
-      sha = get_in(report, ["integrity", "sha256"])
-
-      cond do
-        format in ~w(pdf jpeg png) ->
-          {:ok, %{format: format, mime: mime, sha256: sha, report: report}}
-
-        true ->
-          {:error, {:unsupported_format, format || mime || name}}
-      end
-
-    {:error, %Whiff.Error{reason: :enoent}} ->
-      {:error, :missing}
-
-    {:error, %Whiff.Error{} = err} ->
-      {:error, err}
-  end
-end
-```
-
-### Ingest from an NFS / object-fuse mount
-
-```elixir
-def ingest_from_share(path) do
-  Whiff.extract(path,
-    stage: :local,
-    profile: :standard,
-    privacy: :strict,
-    hashes: [:sha256],
-    limits: [file_timeout_ms: 120_000]
-  )
-end
-```
-
-### Work from bytes (S3 object, email attachment, Plug body)
-
-```elixir
-{:ok, report} =
-  Whiff.extract_binary(file_bytes,
-    name: "invoice.pdf",
-    hashes: [:sha256],
-    privacy: :strict
-  )
-
-report["identification"]["format"]
-#=> "pdf"
-
-report["content"]["title"]
-get_in(report, ["security", "risks"])
-```
-
-### Compact context for an LLM / agent
-
-```elixir
-{:ok, compact} = Whiff.llm("contracts/acme-msa.pdf", tokens: 800, privacy: :strict)
-
-# `compact` is a smaller map derived from the full report (upstream llm_view),
-# suitable as tool/RAG context without dumping the entire JSON document.
-Req.post!(llm_url, json: %{messages: [%{role: "user", content: Jason.encode!(compact)}]})
-```
-
-### Flag secrets / PII before indexing
-
-```elixir
-{:ok, report} = Whiff.extract(path, profile: :full, privacy: :strict)
-
-secrets = get_in(report, ["security", "secrets"]) || []
-pii = get_in(report, ["security", "personal_data"]) || []
-
-if secrets != [] or pii != [] do
-  Logger.warning("sensitive payload",
-    path_basename: Path.basename(path),
-    secret_count: length(List.wrap(secrets)),
-    pii_count: length(List.wrap(pii))
-  )
-end
-```
-
-Prefer **not** logging full paths, excerpts, or raw plugin output when privacy matters.
-
-### Proprietary format via an Elixir Whiffer (`:fallback`)
-
-Native whiff may detect “something text-like” but has no extractor for your format. Register a Whiffer; `:fallback` runs it when native coverage is insufficient (and **not** on inspect failures like `:eacces`).
-
-```elixir
-defmodule MyBank.TradeWhiffer do
-  @behaviour Whiff.Extractor
-
-  def id, do: "mybank.trade"
-  def version, do: 1
-
-  def supports?(%Whiff.Input{extension: ".trade"}, _native), do: true
-  def supports?(_, _), do: false
-
-  def extract(%Whiff.Input{path: path}, _native) do
-    with {:ok, body} <- File.read(path),
-         {:ok, trade} <- MyBank.TradeParser.parse(body) do
-      {:ok,
-       %{
-         "content" => %{"title" => "Trade #{trade.id}"},
-         "format" => %{
-           "mybank.trade" => %{
-             "trade_id" => trade.id,
-             "currency" => trade.currency,
-             "notional" => trade.notional
-           }
-         }
-       }}
-    else
-      {:error, reason} ->
-        {:error,
-         Whiff.Error.new(:extractor_error, "trade parse failed",
-           details: %{cause: inspect(reason)}
-         )}
-    end
-  end
-end
-
-{:ok, report} =
-  Whiff.extract("positions/USD-2026-10-28.trade",
-    extractors: [MyBank.TradeWhiffer],
-    mode: :fallback
-  )
-
-get_in(report, ["format", "mybank.trade", "trade_id"])
-```
-
-See [`examples/trade_whiffer`](examples/trade_whiffer/README.md) for a standalone package that depends on `whiff` without hardcoding into core.
-
-### Enrich a known PDF (`:augment`) + post-pass analyzer
-
-```elixir
-defmodule MyApp.ContractWhiffer do
-  @behaviour Whiff.Extractor
-  def id, do: "myapp.contract"
-  def version, do: 1
-  def supports?(%Whiff.Input{extension: ".pdf"}, _n), do: true
-  def supports?(_, _), do: false
-
-  def extract(_input, _native) do
-    # Native identification already ran; add namespaced domain metadata only.
-    {:ok,
-     %{
-       "format" => %{"myapp.contract" => %{"reviewed" => false}},
-       "content" => %{"keywords" => ["contract"]}
-     }}
-  end
-end
-
-defmodule MyApp.SensitivityAnalyzer do
-  @behaviour Whiff.Analyzer
-  def id, do: "myapp.sensitivity"
-  def version, do: 1
-
-  def analyze(report, _input) do
-    title = get_in(report, ["content", "title"]) || ""
-    {:ok, %{"metadata" => %{"myapp.sensitivity" => %{"title_len" => String.length(title)}}}}
-  end
-end
-
-{:ok, report} =
-  Whiff.extract("contract.pdf",
-    mode: :augment,
-    extractors: [MyApp.ContractWhiffer],
-    analyzers: [MyApp.SensitivityAnalyzer]
-  )
-```
-
-### Batch a directory with bounded concurrency
-
-```elixir
-paths = Path.wildcard("inbox/**/*.{pdf,jpg,png,zip}")
-
-{:ok, results} =
-  Whiff.extract_many(paths,
-    max_concurrency: 4,
-    on_error: :collect,
-    profile: :minimal,
-    hashes: :none
-  )
-
-for {path, {:ok, report}} <- results do
-  IO.puts("#{path} -> #{report["identification"]["format"]}")
-end
-```
-
-### Errors are structured (same type for bang / non-bang)
-
-```elixir
-case Whiff.extract("missing.pdf") do
-  {:error, %Whiff.Error{reason: :enoent}} -> :missing
-  {:error, %Whiff.Error{reason: :eacces}} -> :denied
-  {:error, %Whiff.Error{reason: :invalid_option} = err} -> {:bad_opts, err.message}
-  {:ok, report} -> {:ok, report}
-end
-
-# Bang variants raise the same %Whiff.Error{}
-try do
-  Whiff.extract!("missing.pdf")
-rescue
-  e in Whiff.Error -> {:raised, e.reason}
-end
-```
-
-## Options (common)
-
-| Option | Meaning |
-|---|---|
-| `profile:` | `:minimal` \| `:standard` (default) \| `:full` \| `:llm` |
-| `hashes:` | `:all` \| `:none` \| `[:sha256]` \| `[:blake3]` \| both |
-| `privacy:` | `:strict` (default) \| `:off` — `:off` can surface more PII |
-| `limits:` | keyword list; Elixir + NIF enforce conservative caps |
-| `mode:` | `:fallback` (default) \| `:augment` \| `:override` |
-| `extractors:` / `analyzers:` | behaviour modules |
-| `strict:` | plugin failure → `{:error, _}` instead of diagnostics |
-| `plugin_timeout_ms:` | default `5000` |
-| `tokens:` | LLM budget for `Whiff.llm/2` (default `800`) |
-| `stage:` | `:never` (default) \| `:local` — copy to `:scratch_dir` before path NIF |
-
-Native `limits` apply to the Rust engine. Elixir plugin timeouts are separate (`plugin_timeout_ms`).
-
-**Privacy caveat:** upstream privacy analysis does **not** automatically cover fields added later by Elixir plugins. With `privacy: :strict`, plugin patches get a local scrub — not claimed equivalent to native redaction.
+| `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin` | tested in CI |
+| `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin` | precompiled, not tested in CI |
+| `x86_64-pc-windows-msvc` | precompiled, tested in CI as best effort |
+| musl | not supported |
 
 ## Limitations
 
-- Native `file_timeout` may abandon worker threads; BEAM timeouts cannot kill them.
-- No zero-copy guarantee for `extract_binary` (data may be copied into `Arc<[u8]>`).
-- No Elixir callbacks inside native recursion; no streaming `extract_reader` NIF.
-- `stage: :local` copies the whole file to scratch (bounded by `:scratch_max_bytes`); it does not stream-stage.
-- Do not log secrets, full paths, or raw binary content by default.
+- `extract_binary/2` copies the binary once into native memory.
+- Elixir callbacks never run inside native extraction or for embedded children.
+- There is no streaming NIF; inputs are a path or a binary.
+- `stage: :local` copies the whole file before extraction.
+- `Whiff.Error` messages for IO errors include the full path. Log
+  `Path.basename(err.path)` if paths are sensitive.
 
-## Develop
+## Development
 
 ```bash
 mix deps.get
-WHIFF_BUILD=1 mix test
-mix ci                               # compile, format, credo, doctor, test --cover, docs
-cargo run --manifest-path probes/rust_extract/Cargo.toml
+mix test
+mix ci        # compile, format, credo, doctor, coveralls, docs
+(cd native/whiff_native && cargo test && cargo clippy --all-targets -- -D warnings)
 ```
 
-Design notes: [`docs/adr/0001-baseline.md`](docs/adr/0001-baseline.md). Hex release: [`docs/hex-publish-checklist.md`](docs/hex-publish-checklist.md).
+Golden reports in `test/fixtures/golden/` come from the Rust probe:
+
+```bash
+cargo build --release --manifest-path probes/rust_extract/Cargo.toml
+probes/rust_extract/target/release/whiff_rust_extract_probe --golden test/fixtures/hello.txt \
+  > test/fixtures/golden/hello.txt.json
+```
+
+Design record: [`docs/adr/0001-baseline.md`](docs/adr/0001-baseline.md).
+Release steps: [`docs/hex-publish-checklist.md`](docs/hex-publish-checklist.md).
 
 ## License
 
-MIT. Upstream Rust `whiff` is also MIT.
+MIT. Upstream whiff is also MIT.

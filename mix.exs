@@ -1,7 +1,7 @@
 defmodule Whiff.MixProject do
   use Mix.Project
 
-  @version "0.3.0"
+  @version "0.4.0"
   @source_url "https://github.com/SinAnima/whiff-elixir"
 
   def project do
@@ -16,8 +16,13 @@ defmodule Whiff.MixProject do
       docs: docs(),
       elixirc_paths: elixirc_paths(Mix.env()),
       aliases: aliases(),
-      test_coverage: [tool: ExCoveralls],
-      preferred_cli_env: [
+      test_coverage: [tool: ExCoveralls]
+    ]
+  end
+
+  def cli do
+    [
+      preferred_envs: [
         coveralls: :test,
         "coveralls.detail": :test,
         "coveralls.html": :test,
@@ -31,7 +36,7 @@ defmodule Whiff.MixProject do
 
   def application do
     [
-      extra_applications: [:logger],
+      extra_applications: [:logger, :crypto],
       mod: {Whiff.Application, []}
     ]
   end
@@ -75,6 +80,7 @@ defmodule Whiff.MixProject do
         lib
         native/whiff_native/.cargo
         native/whiff_native/src
+        native/whiff_native/build.rs
         native/whiff_native/Cargo.toml
         native/whiff_native/Cargo.lock
         native/whiff_native/README.md
@@ -106,15 +112,11 @@ defmodule Whiff.MixProject do
 
   defp ci(_) do
     steps = [
-      # ["precommit", :dev],
       {"compile --warnings-as-errors", :dev},
       {"format --check-formatted", :dev},
       {"credo --strict", :dev},
       {"doctor", :dev},
-      # # {"sobelow --config", :dev},
-      # {"dialyzer", :dev},
-      # {"coveralls", :test},
-      {"test --cover", :test},
+      {"coveralls", :test},
       {"docs --warnings-as-errors", :dev}
     ]
 

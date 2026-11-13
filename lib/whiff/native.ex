@@ -37,8 +37,5 @@ defmodule Whiff.Native do
   def llm_path(_path, _options_json), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc false
-  def llm_bytes(_data, _name, _options_json), do: :erlang.nif_error(:nif_not_loaded)
-
-  @doc false
   def native_version, do: :erlang.nif_error(:nif_not_loaded)
 end

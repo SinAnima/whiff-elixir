@@ -1,66 +1,104 @@
 defmodule Whiff.Plugin do
   @moduledoc false
 
-  @doc """
-  Run a zero-arity function in a monitored task with timeout.
+  # Runs plugin callbacks in an isolated, unlinked process.
+  #
+  # * The worker is not linked to the caller: a plugin that exits, is killed,
+  #   or crashes a linked process cannot take the caller down.
+  # * A guard process kills the worker if the caller exits first, so
+  #   abandoned plugin work does not keep running.
+  # * Error messages never include plugin-returned values, thrown values, or
+  #   exception messages, which may contain extracted content.
 
-  Returns:
-  * `{:ok, value}` — function completed; `value` is whatever it returned
-  * `{:error, %Whiff.Error{}}` — raise/throw/exit/timeout
+  alias Whiff.Error
+
+  @doc """
+  Run `fun` with a timeout.
+
+  Options: `:timeout` (ms, default 5000), `:kind` (`:extractor` | `:analyzer`),
+  `:id` (plugin id used in error details).
+
+  Returns `{:ok, value}` or `{:error, %Whiff.Error{}}` for raise, throw, exit,
+  kill, or timeout.
   """
-  @spec run((-> term()), keyword()) :: {:ok, term()} | {:error, Whiff.Error.t()}
+  @spec run((-> term()), keyword()) :: {:ok, term()} | {:error, Error.t()}
   def run(fun, opts \\ []) when is_function(fun, 0) do
     timeout = Keyword.get(opts, :timeout, 5_000)
     kind = Keyword.get(opts, :kind, :extractor)
     id = Keyword.get(opts, :id, "plugin")
+    caller = self()
+    ref = make_ref()
 
-    task =
-      Task.async(fn ->
-        try do
-          {:ok, fun.()}
-        rescue
-          e in Whiff.Error ->
-            {:error, e}
+    {pid, mon} = spawn_monitor(fn -> send(caller, {ref, invoke(fun, kind, id)}) end)
+    guard = spawn(fn -> guard(caller, pid) end)
 
-          e ->
-            {:error,
-             Whiff.Error.new(error_reason(kind), Exception.message(e),
-               details: %{plugin: id, class: e.__struct__}
-             )}
-        catch
-          :throw, value ->
-            {:error,
-             Whiff.Error.new(error_reason(kind), "plugin threw: #{inspect(value)}",
-               details: %{plugin: id}
-             )}
+    result =
+      receive do
+        {^ref, result} ->
+          result
 
-          :exit, reason ->
-            {:error,
-             Whiff.Error.new(error_reason(kind), "plugin exited: #{inspect(reason)}",
-               details: %{plugin: id}
-             )}
-        end
-      end)
+        {:DOWN, ^mon, :process, ^pid, reason} ->
+          {:error,
+           Error.new(reason_for(kind), "plugin process exited (#{exit_kind(reason)})",
+             details: %{plugin: id}
+           )}
+      after
+        timeout ->
+          Process.exit(pid, :kill)
 
-    case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
-      {:ok, {:ok, value}} ->
-        {:ok, value}
+          {:error,
+           Error.new(:timeout, "plugin timed out after #{timeout}ms", details: %{plugin: id})}
+      end
 
-      {:ok, {:error, %Whiff.Error{}} = err} ->
-        err
+    Process.demonitor(mon, [:flush])
+    Process.exit(guard, :kill)
+    flush(ref)
+    result
+  end
 
-      nil ->
-        {:error,
-         Whiff.Error.new(:timeout, "plugin timed out after #{timeout}ms", details: %{plugin: id})}
+  defp invoke(fun, kind, id) do
+    {:ok, fun.()}
+  rescue
+    e in Error ->
+      {:error, e}
 
-      {:exit, reason} ->
-        {:error,
-         Whiff.Error.new(error_reason(kind), "plugin task exited: #{inspect(reason)}",
-           details: %{plugin: id}
-         )}
+    e ->
+      {:error,
+       Error.new(reason_for(kind), "plugin raised #{inspect(e.__struct__)}",
+         details: %{plugin: id, class: e.__struct__}
+       )}
+  catch
+    :throw, _value ->
+      {:error, Error.new(reason_for(kind), "plugin threw a value", details: %{plugin: id})}
+
+    :exit, reason ->
+      {:error,
+       Error.new(reason_for(kind), "plugin exited (#{exit_kind(reason)})", details: %{plugin: id})}
+  end
+
+  defp guard(caller, worker) do
+    caller_mon = Process.monitor(caller)
+    worker_mon = Process.monitor(worker)
+
+    receive do
+      {:DOWN, ^caller_mon, :process, _, _} -> Process.exit(worker, :kill)
+      {:DOWN, ^worker_mon, :process, _, _} -> :ok
     end
   end
 
-  defp error_reason(:analyzer), do: :analyzer_error
-  defp error_reason(_), do: :extractor_error
+  defp flush(ref) do
+    receive do
+      {^ref, _} -> :ok
+    after
+      0 -> :ok
+    end
+  end
+
+  # Only the shape of the exit reason; never its payload.
+  defp exit_kind(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp exit_kind({reason, _}) when is_atom(reason), do: Atom.to_string(reason)
+  defp exit_kind(_), do: "abnormal"
+
+  defp reason_for(:analyzer), do: :analyzer_error
+  defp reason_for(_), do: :extractor_error
 end

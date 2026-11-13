@@ -5,8 +5,7 @@
     Whiff.Limiter,
     Whiff.Options,
     Whiff.Plugin,
-    Whiff.Registry,
-    Whiff.Privacy
+    Whiff.Registry
   ],
   ignore_paths: [
     ~r(test/),

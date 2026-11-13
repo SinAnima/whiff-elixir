@@ -1,211 +1,231 @@
 defmodule Whiff.MergeTest do
   use ExUnit.Case, async: true
 
+  doctest Whiff.Merge
+
   alias Whiff.Merge
 
   @base %{
     "whiff" => %{"schema" => "whiff/1"},
-    "content" => %{"title" => "native"},
-    "metadata" => %{"native_key" => 1},
-    "format" => %{"native_fmt" => %{"a" => 1}},
-    "security" => %{"risks" => ["x"]},
-    "diagnostics" => %{"warnings" => ["w0"], "extractors" => []}
+    "content" => %{"title" => "native", "keywords" => ["a"]},
+    "metadata" => %{"native.key" => 1},
+    "format" => %{"native.fmt" => %{"a" => 1}},
+    "security" => %{"risks" => [%{"kind" => "macros", "source" => "office"}], "encrypted" => false},
+    "temporal" => %{"created" => "old"},
+    "diagnostics" => %{"warnings" => ["w0"], "extractors" => [], "truncated" => false}
   }
 
-  test "rejects non-map arguments" do
-    assert {:error, %Whiff.Error{reason: :invalid_report}} = Merge.merge("nope", %{}, [])
+  defp conflict?(result), do: match?({:error, %Whiff.Error{reason: :conflict}}, result)
+  defp invalid?(result), do: match?({:error, %Whiff.Error{reason: :invalid_report}}, result)
+
+  describe "sections" do
+    test "protected and unknown sections are rejected" do
+      assert conflict?(Merge.merge(@base, %{"whiff" => %{"schema" => "x"}}))
+      assert conflict?(Merge.merge(@base, %{"integrity" => %{}}))
+      assert invalid?(Merge.merge(@base, %{"embedded" => [%{}]}))
+      assert invalid?(Merge.merge(@base, %{"plugins" => %{"x" => 1}}))
+      assert invalid?(Merge.merge(@base, %{"content" => "not-a-map"}))
+    end
+
+    test "diagnostics accepts only warnings, prefixed with the plugin id" do
+      assert {:ok, merged} =
+               Merge.merge(@base, %{"diagnostics" => %{"warnings" => ["w1"]}}, plugin_id: "demo")
+
+      assert merged["diagnostics"]["warnings"] == ["w0", "elixir:demo: w1"]
+      assert merged["diagnostics"]["truncated"] == false
+
+      assert conflict?(Merge.merge(@base, %{"diagnostics" => %{"truncated" => true}}))
+      assert conflict?(Merge.merge(@base, %{"diagnostics" => %{"extractors" => [%{"id" => "x"}]}}))
+      assert invalid?(Merge.merge(@base, %{"diagnostics" => %{"warnings" => [1]}}))
+    end
   end
 
-  test "rejects protected top-level sections" do
-    assert {:error, %Whiff.Error{reason: :conflict}} =
-             Merge.merge(@base, %{"whiff" => %{"schema" => "x"}}, mode: :augment)
+  describe "security" do
+    test "secrets and personal_data cannot be patched" do
+      assert conflict?(Merge.merge(@base, %{"security" => %{"secrets" => %{}}}))
+      assert conflict?(Merge.merge(@base, %{"security" => %{"personal_data" => %{}}}))
+    end
 
-    assert {:error, %Whiff.Error{reason: :conflict}} =
-             Merge.merge(@base, %{"integrity" => %{}}, mode: :augment)
+    test "risks are appended with an elixir source, native risks kept" do
+      risk = %{"kind" => "custom", "category" => "other", "severity" => "low", "source" => "spoof"}
+
+      assert {:ok, merged} =
+               Merge.merge(@base, %{"security" => %{"risks" => [risk]}}, plugin_id: "scan")
+
+      assert [%{"source" => "office"}, %{"kind" => "custom", "source" => "elixir:scan"}] =
+               merged["security"]["risks"]
+    end
+
+    test "invalid risk entries are rejected" do
+      for bad <- [
+            %{"category" => "other", "severity" => "low"},
+            %{"kind" => "x", "category" => "nope", "severity" => "low"},
+            %{"kind" => "x", "category" => "other", "severity" => "extreme"},
+            %{"kind" => "x", "category" => "other", "severity" => "low", "extra" => 1},
+            %{"kind" => "x", "category" => "other", "severity" => "low", "detail" => 1},
+            "not a map"
+          ] do
+        assert invalid?(Merge.merge(@base, %{"security" => %{"risks" => [bad]}})), inspect(bad)
+      end
+
+      assert invalid?(Merge.merge(@base, %{"security" => %{"risks" => "x"}}))
+    end
+
+    test "other security keys can be added but never replaced, even under override" do
+      assert {:ok, merged} = Merge.merge(@base, %{"security" => %{"signed" => true}})
+      assert merged["security"]["signed"] == true
+
+      assert conflict?(
+               Merge.merge(@base, %{"security" => %{"encrypted" => true}},
+                 mode: :override,
+                 override_fields: ["security.encrypted"]
+               )
+             )
+
+      assert {:ok, _} = Merge.merge(@base, %{"security" => %{"encrypted" => false}})
+    end
   end
 
-  test "rejects security risks/secrets/personal_data replacements" do
-    assert {:error, %Whiff.Error{reason: :conflict}} =
-             Merge.merge(@base, %{"security" => %{"risks" => []}}, mode: :augment)
+  describe "content" do
+    test "keywords append and de-duplicate" do
+      assert {:ok, merged} = Merge.merge(@base, %{"content" => %{"keywords" => ["a", "b"]}})
+      assert merged["content"]["keywords"] == ["a", "b"]
+    end
+
+    test "augment keeps native scalars, fallback replaces them" do
+      patch = %{"content" => %{"title" => "plugin", "extra" => 1}}
+
+      assert {:ok, kept} = Merge.merge(@base, patch, mode: :augment)
+      assert {kept["content"]["title"], kept["content"]["extra"]} == {"native", 1}
+
+      assert {:ok, replaced} = Merge.merge(@base, patch, mode: :fallback)
+      assert replaced["content"]["title"] == "plugin"
+    end
+
+    test "override requires a declared full path" do
+      patch = %{"content" => %{"title" => "plugin"}}
+      assert conflict?(Merge.merge(@base, patch, mode: :override))
+      assert conflict?(Merge.merge(@base, patch, mode: :override, override_fields: ["title"]))
+
+      assert {:ok, merged} =
+               Merge.merge(@base, patch, mode: :override, override_fields: ["content.title"])
+
+      assert merged["content"]["title"] == "plugin"
+    end
   end
 
-  test "allows soft security fields via deep merge" do
-    assert {:ok, report} =
-             Merge.merge(@base, %{"security" => %{"notes" => "ok"}}, mode: :augment)
+  describe "plugin ownership" do
+    test "a value set by an earlier plugin is a conflict in every mode unless declared" do
+      owned = MapSet.new(["content.title"])
+      patch = %{"content" => %{"title" => "second"}}
 
-    assert get_in(report, ["security", "notes"]) == "ok"
-    assert get_in(report, ["security", "risks"]) == ["x"]
-  end
+      for mode <- [:augment, :fallback, :override] do
+        assert conflict?(Merge.merge(@base, patch, mode: mode, owned: owned)), "#{mode}"
+      end
 
-  test "merges diagnostics warnings and extractors" do
-    patch = %{
-      "diagnostics" => %{
-        "warnings" => ["w1"],
-        "limits_hit" => ["depth"],
-        "extractors" => [%{"id" => "p"}],
-        "extra" => true
+      assert {:ok, merged} =
+               Merge.merge(@base, patch,
+                 mode: :override,
+                 owned: owned,
+                 override_fields: ["content.title"]
+               )
+
+      assert merged["content"]["title"] == "second"
+    end
+
+    test "an identical value is not a conflict" do
+      owned = MapSet.new(["content.title"])
+      assert {:ok, _} = Merge.merge(@base, %{"content" => %{"title" => "native"}}, owned: owned)
+    end
+
+    test "no-op patches write nothing" do
+      patch = %{"content" => %{"keywords" => ["a"], "title" => "native"}}
+
+      assert {:ok, merged, []} = Merge.merge_tracked(@base, patch, provenance: true)
+      assert merged == @base
+    end
+
+    test "nested maps under an existing value merge recursively" do
+      report = Map.put(@base, "physical", %{"image" => %{"width" => 1}})
+
+      assert {:ok, merged, ["physical.image.height"]} =
+               Merge.merge_tracked(report, %{"physical" => %{"image" => %{"height" => 2}}})
+
+      assert merged["physical"]["image"] == %{"width" => 1, "height" => 2}
+    end
+
+    test "merge_tracked reports written leaf paths" do
+      patch = %{
+        "content" => %{"extra" => 1, "title" => "ignored"},
+        "format" => %{"p.q" => %{"r" => 1}}
       }
-    }
 
-    assert {:ok, report} = Merge.merge(@base, patch, mode: :augment)
-    assert "w0" in report["diagnostics"]["warnings"]
-    assert "w1" in report["diagnostics"]["warnings"]
-    assert "depth" in report["diagnostics"]["limits_hit"]
-    assert report["diagnostics"]["extra"] == true
-    assert Enum.any?(report["diagnostics"]["extractors"], &(&1["id"] == "p"))
+      assert {:ok, _merged, written} = Merge.merge_tracked(@base, patch, mode: :augment)
+      assert Enum.sort(written) == ["content.extra", "format.p.q.r"]
+    end
   end
 
-  test "content keywords dedupe and fallback replaces scalars" do
-    report = Map.put(@base, "content", %{"title" => "native", "keywords" => ["a"]})
+  describe "namespaces and trees" do
+    test "existing metadata/format namespaces collide unless declared" do
+      assert conflict?(Merge.merge(@base, %{"metadata" => %{"native.key" => 2}}))
+      assert conflict?(Merge.merge(@base, %{"format" => %{"native.fmt" => %{"b" => 2}}}))
 
-    assert {:ok, merged} =
-             Merge.merge(report, %{"content" => %{"keywords" => ["a", "b"], "title" => "plugin"}},
-               mode: :fallback
-             )
+      assert {:ok, merged} =
+               Merge.merge(@base, %{"metadata" => %{"native.key" => 2}},
+                 mode: :override,
+                 override_fields: ["metadata.native.key"]
+               )
 
-    assert merged["content"]["title"] == "plugin"
-    assert merged["content"]["keywords"] == ["a", "b"]
+      assert merged["metadata"]["native.key"] == 2
+    end
+
+    test "tree sections add missing values and keep native values" do
+      assert {:ok, added} = Merge.merge(@base, %{"system" => %{"os" => %{"arch" => "arm"}}})
+      assert added["system"]["os"]["arch"] == "arm"
+
+      assert {:ok, kept} = Merge.merge(@base, %{"temporal" => %{"created" => "new"}})
+      assert kept["temporal"]["created"] == "old"
+
+      assert conflict?(Merge.merge(@base, %{"temporal" => %{"created" => "new"}}, mode: :override))
+    end
   end
 
-  test "content augment keeps native scalars" do
-    assert {:ok, merged} =
-             Merge.merge(@base, %{"content" => %{"title" => "plugin", "extra" => 1}},
-               mode: :augment
+  describe "validation" do
+    test "rejects unsupported terms" do
+      for value <- [:atom, self(), make_ref(), fn -> :ok end, %Whiff.Error{message: "x"}] do
+        assert invalid?(Merge.merge(@base, %{"content" => %{"v" => value}})), inspect(value)
+      end
+
+      assert invalid?(Merge.merge(@base, %{content: %{"title" => "x"}}))
+    end
+
+    test "rejects oversized maps, depth, strings, node counts, and total bytes" do
+      assert invalid?(Merge.merge(@base, %{"metadata" => Map.new(1..300, &{"k#{&1}", &1})}))
+
+      deep = Enum.reduce(1..10, "leaf", fn i, acc -> %{"l#{i}" => acc} end)
+      assert invalid?(Merge.merge(@base, %{"metadata" => %{"deep" => deep}}))
+
+      assert invalid?(
+               Merge.merge(@base, %{"metadata" => %{"big" => String.duplicate("a", 65 * 1024)}})
              )
 
-    assert merged["content"]["title"] == "native"
-    assert merged["content"]["extra"] == 1
+      assert invalid?(Merge.merge(@base, %{"metadata" => %{"list" => List.duplicate(1, 20_000)}}))
+
+      chunks = for i <- 1..20, into: %{}, do: {"c#{i}", String.duplicate("a", 60 * 1024)}
+      assert invalid?(Merge.merge(@base, %{"metadata" => %{"x.y" => chunks}}))
+    end
   end
 
-  test "content override requires declared fields" do
-    assert {:error, %Whiff.Error{reason: :conflict}} =
-             Merge.merge(@base, %{"content" => %{"title" => "plugin"}}, mode: :override)
+  test "provenance uses upstream string shape for written paths only" do
+    report = put_in(@base, ["diagnostics", "provenance"], %{"content.title" => "text.plain"})
+    patch = %{"content" => %{"title" => "kept native", "extra" => 1}, "metadata" => %{"p.q" => 1}}
 
-    assert {:ok, merged} =
-             Merge.merge(@base, %{"content" => %{"title" => "plugin"}},
-               mode: :override,
-               override_fields: ["content.title"]
-             )
+    assert {:ok, merged} = Merge.merge(report, patch, provenance: true, plugin_id: "demo")
 
-    assert merged["content"]["title"] == "plugin"
-  end
-
-  test "metadata namespace collision and override" do
-    assert {:error, %Whiff.Error{reason: :conflict}} =
-             Merge.merge(@base, %{"metadata" => %{"native_key" => 2}}, mode: :augment)
-
-    assert {:ok, merged} =
-             Merge.merge(@base, %{"metadata" => %{"native_key" => 2}},
-               mode: :override,
-               override_fields: ["metadata.native_key"]
-             )
-
-    assert merged["metadata"]["native_key"] == 2
-  end
-
-  test "deep merge nested maps and override leaf collision" do
-    # format/metadata are namespaced: colliding top keys error
-    assert {:error, %Whiff.Error{reason: :conflict}} =
-             Merge.merge(@base, %{"format" => %{"native_fmt" => %{"nested" => %{"y" => 2}}}},
-               mode: :augment
-             )
-
-    assert {:ok, merged} =
-             Merge.merge(@base, %{"format" => %{"plugin_fmt" => %{"nested" => %{"y" => 2}}}},
-               mode: :augment
-             )
-
-    assert get_in(merged, ["format", "plugin_fmt", "nested", "y"]) == 2
-
-    assert {:ok, overridden} =
-             Merge.merge(@base, %{"temporal" => %{"created" => "now"}}, mode: :augment)
-
-    assert overridden["temporal"]["created"] == "now"
-
-    report2 = Map.put(@base, "temporal", %{"created" => "old"})
-
-    assert {:ok, kept} =
-             Merge.merge(report2, %{"temporal" => %{"created" => "new"}}, mode: :augment)
-
-    assert kept["temporal"]["created"] == "old"
-
-    assert {:error, %Whiff.Error{reason: :conflict}} =
-             Merge.merge(report2, %{"temporal" => %{"created" => "new"}}, mode: :override)
-
-    assert {:ok, forced} =
-             Merge.merge(report2, %{"temporal" => %{"created" => "new"}},
-               mode: :override,
-               override_fields: ["temporal.created"]
-             )
-
-    assert forced["temporal"]["created"] == "new"
-
-    # nested deep_merge under a non-namespaced section
-    report3 = Map.put(@base, "system", %{"os" => %{"name" => "mac"}})
-
-    assert {:ok, deep} =
-             Merge.merge(report3, %{"system" => %{"os" => %{"arch" => "arm"}}}, mode: :augment)
-
-    assert get_in(deep, ["system", "os", "name"]) == "mac"
-    assert get_in(deep, ["system", "os", "arch"]) == "arm"
-  end
-
-  test "rejects unsupported section types and invalid terms" do
-    assert {:error, %Whiff.Error{reason: :invalid_report}} =
-             Merge.merge(@base, %{"content" => "not-a-map"}, mode: :augment)
-
-    assert {:error, %Whiff.Error{reason: :invalid_report}} =
-             Merge.merge(@base, %{"content" => %{"title" => :atom}}, mode: :augment)
-
-    assert {:error, %Whiff.Error{reason: :invalid_report}} =
-             Merge.merge(@base, %{"content" => %{"title" => self()}}, mode: :augment)
-
-    assert {:error, %Whiff.Error{reason: :invalid_report}} =
-             Merge.merge(@base, %{"content" => %{"box" => %Whiff.Error{message: "x", reason: :x}}},
-               mode: :augment
-             )
-  end
-
-  test "rejects oversized maps, depth, and strings" do
-    big_map = Map.new(1..300, fn i -> {"k#{i}", i} end)
-
-    assert {:error, %Whiff.Error{reason: :invalid_report}} =
-             Merge.merge(@base, %{"metadata" => big_map}, mode: :augment)
-
-    deep =
-      Enum.reduce(1..10, "leaf", fn i, acc -> %{"l#{i}" => acc} end)
-
-    assert {:error, %Whiff.Error{reason: :invalid_report}} =
-             Merge.merge(@base, %{"metadata" => %{"deep" => deep}}, mode: :augment)
-
-    huge = String.duplicate("a", 65 * 1024)
-
-    assert {:error, %Whiff.Error{reason: :invalid_report}} =
-             Merge.merge(@base, %{"metadata" => %{"big" => huge}}, mode: :augment)
-  end
-
-  test "provenance annotates plugin paths without clobbering native" do
-    report =
-      put_in(@base, ["diagnostics", "provenance"], %{
-        "content.title" => %{"source" => "native"}
-      })
-
-    assert {:ok, merged} =
-             Merge.merge(
-               report,
-               %{"content" => %{"extra" => 1}, "metadata" => %{"p" => %{"q" => 1}}},
-               mode: :augment,
-               provenance: true,
-               plugin_id: "demo"
-             )
-
-    prov = get_in(merged, ["diagnostics", "provenance"])
-    assert prov["content.title"]["source"] == "native"
-    assert prov["content.extra"]["source"] == "elixir:demo"
-    assert prov["metadata.p.q"]["source"] == "elixir:demo"
-  end
-
-  test "validate_patch accepts lists of scalars" do
-    assert :ok = Merge.validate_patch(["a", 1, true, nil], 0)
+    assert merged["diagnostics"]["provenance"] == %{
+             "content.title" => "text.plain",
+             "content.extra" => "elixir:demo",
+             "metadata.p.q" => "elixir:demo"
+           }
   end
 end

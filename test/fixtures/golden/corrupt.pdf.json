@@ -1,0 +1,111 @@
+{
+ "content": {},
+ "diagnostics": {
+  "elapsed_ms": 2.219,
+  "extractors": [
+   {
+    "error": "malformed: no objects found",
+    "error_kind": "malformed",
+    "id": "doc.pdf",
+    "ms": 0.013,
+    "status": "error",
+    "version": 1
+   },
+   {
+    "id": "meta.mwg",
+    "ms": 0.002,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.language",
+    "ms": 0.0,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.excerpt",
+    "ms": 0.001,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.keywords",
+    "ms": 0.051,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.summary",
+    "ms": 0.0,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "temporal.range",
+    "ms": 0.001,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "privacy.scan",
+    "ms": 0.001,
+    "status": "ok",
+    "version": 1
+   }
+  ],
+  "truncated": false,
+  "warnings": [
+   "doc.pdf: no startxref; rebuilding the cross-reference table"
+  ]
+ },
+ "format": {},
+ "identification": {
+  "confidence": 0.85,
+  "detected_by": "magic",
+  "encoding": "us-ascii",
+  "extension_matches": true,
+  "extractor": "doc.pdf",
+  "family": "doc.pdf",
+  "format": "pdf",
+  "mime": "application/pdf",
+  "name": "PDF document"
+ },
+ "integrity": {
+  "blake3": "92e7cf44f4c33877fd181ef6333c825fcd4baf52d671651786aa7fc7ddf89296",
+  "sha256": "84fd9864a174a106ac7ba87d33d0773666e625dd1f75ef163de5e338e5651106"
+ },
+ "metadata": {},
+ "physical": {
+  "entropy": 4.208,
+  "entropy_scope": "file",
+  "size_bytes": 27,
+  "text": {
+   "blank_lines": 0,
+   "bom": false,
+   "bytes": 27,
+   "chars": 27,
+   "line_endings": "lf",
+   "lines": 1,
+   "max_line_length": 18,
+   "words": 5
+  }
+ },
+ "rights": {},
+ "security": {},
+ "source": {
+  "extension": "pdf",
+  "name": "corrupt.pdf",
+  "stem": "corrupt"
+ },
+ "system": {
+  "kind": "regular",
+  "size_bytes": 27
+ },
+ "temporal": {},
+ "whiff": {
+  "profile": "standard",
+  "schema": "whiff/1",
+  "version": "0.8.0"
+ }
+}

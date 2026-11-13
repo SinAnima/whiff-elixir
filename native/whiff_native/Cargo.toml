@@ -1,6 +1,6 @@
 [package]
 name = "whiff_native"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.91"
 publish = false
@@ -13,4 +13,4 @@ crate-type = ["cdylib"]
 rustler = "0.38"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-whiff = { version = "0.6.0", default-features = false, features = ["common"] }
+whiff = { version = "0.8.0", default-features = false, features = ["common"] }

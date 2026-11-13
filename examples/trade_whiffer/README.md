@@ -1,37 +1,52 @@
 # TradeWhiffer
 
-Tiny example package showing how to register an external `Whiff.Extractor`
-without hardcoding it into core `whiff`.
+Example package that implements `Whiff.Extractor` for a proprietary `.trade`
+text format. It depends on `whiff` like any other application and registers
+its extractor per call; nothing in `whiff` refers to it.
 
-Depends on the parent project via `path: "../.."` (use `{:whiff, "~> 0.3.0"}` from Hex in a real app).
+This copy depends on the parent repository with `path: "../.."`. An
+application would use `{:whiff, "~> 0.4.0"}` from Hex. The path dependency
+also pulls the optional `:rustler` dependency so the NIF can be built from
+source.
 
-## Fallback Whiffer
-
-```elixir
-{:ok, report} =
-  Whiff.extract("sample.trade",
-    extractors: [TradeWhiffer],
-    mode: :fallback
-  )
-```
-
-## With local scratch (slow share)
-
-If `.trade` files live on NFS, stage before the NIF:
+## Usage
 
 ```elixir
-# config/config.exs
-config :whiff,
-  scratch_dir: "/var/cache/whiff",
-  scratch_max_bytes: 64 * 1024 * 1024
+{:ok, report} = Whiff.extract("deal.trade", extractors: [TradeWhiffer])
 
-{:ok, report} =
-  Whiff.extract("/mnt/nfs/feeds/deal.trade",
-    stage: :local,
-    extractors: [TradeWhiffer],
-    mode: :fallback,
-    hashes: :none
-  )
+report["format"]["example.trade"]
+#=> %{"trade_id" => "T-1001", "currency" => "USD"}
 ```
 
-Staging copies on the BEAM; Elixir plugins still see the original path/filename via `Whiff.Input`.
+The default `mode: :fallback` runs the extractor only when native whiff did
+not cover the file. Upstream detects a `.trade` file as plain text by
+heuristic, which does not count as coverage.
+
+In-memory bytes work the same way:
+
+```elixir
+Whiff.extract_binary(bytes, name: "deal.trade", extractors: [TradeWhiffer])
+```
+
+A file that does not start with `TRADE/1` still returns `{:ok, report}`; the
+failure is recorded in `report["diagnostics"]["extractors"]`.
+
+## Files on a network share
+
+```elixir
+config :whiff, scratch_dir: "/var/cache/whiff"
+
+Whiff.extract("/mnt/nfs/feeds/deal.trade", stage: :local, extractors: [TradeWhiffer])
+```
+
+The native step reads the local copy. The extractor receives a
+`Whiff.Input` for the original path and reads at most 64 KiB of it.
+
+## Test
+
+```bash
+mix deps.get
+mix test
+```
+
+The tests use `test/fixtures/sample.trade` from the parent repository.

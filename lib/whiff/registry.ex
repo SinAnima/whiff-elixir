@@ -1,21 +1,22 @@
 defmodule Whiff.Registry do
   @moduledoc false
 
-  alias Whiff.{Input, Merge, Plugin, Privacy, Report}
+  # Runs Elixir extractors, then analyzers, against a native report.
+  #
+  # Order is the list order from the call (or app config). Every run, success
+  # or failure, is recorded in `diagnostics.extractors` in the schema
+  # `ExtractorRun` shape. With `strict: true` the first failure is returned
+  # as `{:error, %Whiff.Error{}}` instead.
 
-  @type ctx :: %{
-          mode: atom(),
-          strict?: boolean(),
-          timeout: pos_integer(),
-          privacy: atom(),
-          provenance?: boolean(),
-          override_fields: [String.t()]
-        }
+  alias Whiff.{Error, Input, Merge, Options, Plugin, Privacy, Report}
 
-  @doc """
-  Run the Elixir extractor/analyzer pipeline against a native report.
-  """
-  @spec run(Input.t(), map(), map()) :: {:ok, map()} | {:error, Whiff.Error.t()}
+  @max_id_bytes 128
+  @max_version 4_294_967_295
+  @max_error_bytes 256
+  @meta_timeout_ms 1_000
+
+  @doc "Run the plugin pipeline. `opts` is the normalized options map."
+  @spec run(Input.t(), map(), map()) :: {:ok, map()} | {:error, Error.t()}
   def run(%Input{} = input, report, opts) when is_map(report) and is_map(opts) do
     ctx = %{
       mode: Map.get(opts, :mode, :fallback),
@@ -23,199 +24,227 @@ defmodule Whiff.Registry do
       timeout: Map.get(opts, :plugin_timeout_ms, 5_000),
       privacy: Map.get(opts, :privacy, :strict),
       provenance?: Map.get(opts, :provenance, false),
-      override_fields: Map.get(opts, :override_fields, [])
+      override_fields: Map.get(opts, :override_fields, []),
+      native_ids: MapSet.new(Report.extractor_ids(report)),
+      covered?: Report.native_covered?(report),
+      unreadable?: Report.unreadable?(report)
     }
 
-    extractors = resolve_extractors(opts)
-    analyzers = resolve_analyzers(opts)
-
-    with {:ok, report} <- run_extractors(input, report, extractors, ctx),
-         {:ok, report} <- run_analyzers(input, report, analyzers, ctx) do
+    with {:ok, extractors} <- resolve(opts, :extractors),
+         {:ok, analyzers} <- resolve(opts, :analyzers),
+         {:ok, report, owned} <- run_extractors(input, report, extractors, ctx),
+         {:ok, report, _owned} <- run_analyzers(input, report, owned, analyzers, ctx) do
       {:ok, report}
     end
   end
 
-  defp resolve_extractors(opts) do
-    call = Map.get(opts, :extractors)
-    config = Application.get_env(:whiff, :extractors, [])
-    List.wrap(call || config)
-  end
-
-  defp resolve_analyzers(opts) do
-    call = Map.get(opts, :analyzers)
-    config = Application.get_env(:whiff, :analyzers, [])
-    List.wrap(call || config)
+  # Per-call lists were validated by Options; app config is validated here.
+  defp resolve(opts, kind) do
+    case Map.fetch(opts, kind) do
+      {:ok, list} -> {:ok, list}
+      :error -> Options.validate_modules(Application.get_env(:whiff, kind, []), kind)
+    end
   end
 
   defp run_extractors(input, report, extractors, ctx) do
-    covered? = Report.native_covered?(report)
+    reduce_plugins(extractors, report, MapSet.new(), fn mod, acc, owned ->
+      run_extractor(mod, input, acc, owned, ctx)
+    end)
+  end
 
-    Enum.reduce_while(extractors, {:ok, report}, fn mod, {:ok, acc} ->
-      case maybe_run_extractor(mod, input, acc, covered?, ctx) do
-        {:ok, next} -> {:cont, {:ok, next}}
+  defp run_analyzers(input, report, owned, analyzers, ctx) do
+    reduce_plugins(analyzers, report, owned, fn mod, acc, owned ->
+      run_analyzer(mod, input, acc, owned, ctx)
+    end)
+  end
+
+  # Analyzer patches always merge in :augment mode.
+  defp run_analyzer(mod, input, report, owned, ctx) do
+    case metadata(mod, :analyzer, ctx) do
+      {:ok, meta} ->
+        meta
+        |> timed(fn -> mod.analyze(report, input) end, ctx)
+        |> outcome(report, owned, :augment, ctx)
+
+      {:error, err, meta} ->
+        failure(report, owned, err, meta, ctx)
+    end
+  end
+
+  defp reduce_plugins(mods, report, owned, fun) do
+    Enum.reduce_while(mods, {:ok, report, owned}, fn mod, {:ok, acc, owned} ->
+      case fun.(mod, acc, owned) do
+        {:ok, next, owned} -> {:cont, {:ok, next, owned}}
         {:error, _} = err -> {:halt, err}
-        :skip -> {:cont, {:ok, acc}}
       end
     end)
   end
 
-  defp maybe_run_extractor(mod, input, report, covered?, ctx) do
-    id = safe_id(mod)
+  defp run_extractor(mod, input, report, owned, ctx) do
+    with {:ok, meta} <- metadata(mod, :extractor, ctx),
+         {:ok, true} <- supports(mod, input, report, meta, ctx) do
+      extract(mod, meta, input, report, owned, ctx)
+    else
+      {:ok, _not_supported} -> {:ok, report, owned}
+      {:error, err, meta} -> failure(report, owned, err, meta, ctx)
+    end
+  end
 
+  # :fallback never runs when native covered the file or could not read it.
+  defp extract(_mod, _meta, _input, report, owned, %{mode: :fallback} = ctx)
+       when ctx.covered? or ctx.unreadable?,
+       do: {:ok, report, owned}
+
+  defp extract(mod, meta, input, report, owned, ctx) do
+    meta
+    |> timed(fn -> mod.extract(input, report) end, ctx)
+    |> outcome(report, owned, ctx.mode, ctx)
+  end
+
+  defp supports(mod, input, report, meta, ctx) do
     case Plugin.run(fn -> mod.supports?(input, report) end,
            timeout: ctx.timeout,
-           id: id,
-           kind: :extractor
+           id: meta.id,
+           kind: meta.kind
          ) do
+      {:ok, value} -> {:ok, value === true}
+      {:error, err} -> {:error, err, meta}
+    end
+  end
+
+  # id/0 and version/0 run isolated too, so a hanging or raising callback
+  # cannot block or crash the caller.
+  defp metadata(mod, kind, ctx) do
+    fallback = %{id: inspect(mod), version: 0, kind: kind, ms: 0.0}
+
+    case Plugin.run(fn -> {mod.id(), mod.version()} end,
+           timeout: min(ctx.timeout, @meta_timeout_ms),
+           id: fallback.id,
+           kind: kind
+         ) do
+      {:ok, {id, version}} ->
+        validate_metadata(id, version, fallback, ctx)
+
+      {:ok, _other} ->
+        {:error, Error.new(reason_for(kind), "id/0 or version/0 failed"), fallback}
+
       {:error, err} ->
-        if ctx.strict?, do: {:error, err}, else: :skip
-
-      {:ok, true} ->
-        if ctx.mode == :fallback and covered? do
-          :skip
-        else
-          do_extract(mod, input, report, id, ctx)
-        end
-
-      {:ok, _} ->
-        :skip
+        {:error, err, fallback}
     end
   end
 
-  defp do_extract(mod, input, report, id, ctx) do
-    t0 = System.monotonic_time(:microsecond)
+  defp validate_metadata(id, version, fallback, ctx) do
+    error = fn reason, message -> {:error, Error.new(reason, message), fallback} end
 
-    result =
-      Plugin.run(fn -> mod.extract(input, report) end,
-        timeout: ctx.timeout,
-        id: id,
-        kind: :extractor
-      )
-
-    ms = (System.monotonic_time(:microsecond) - t0) / 1000
-    version = safe_version(mod)
-    meta = %{id: id, version: version, ms: ms}
-
-    case result do
-      {:ok, {:ok, patch}} when is_map(patch) ->
-        finish_patch(report, patch, ctx.mode, meta, ctx)
-
-      {:ok, {:error, %Whiff.Error{} = err}} ->
-        handle_plugin_failure(report, err, meta, ctx.strict?)
-
-      {:ok, other} ->
-        err =
-          Whiff.Error.new(
-            :extractor_error,
-            "extractor returned unexpected value: #{inspect(other)}",
-            details: %{plugin: id}
-          )
-
-        handle_plugin_failure(report, err, meta, ctx.strict?)
-
-      {:error, %Whiff.Error{} = err} ->
-        handle_plugin_failure(report, err, meta, ctx.strict?)
-    end
-  end
-
-  defp run_analyzers(input, report, analyzers, ctx) do
-    Enum.reduce_while(analyzers, {:ok, report}, fn mod, {:ok, acc} ->
-      id = safe_id(mod)
-      version = safe_version(mod)
-      t0 = System.monotonic_time(:microsecond)
-
-      result =
-        Plugin.run(fn -> mod.analyze(acc, input) end,
-          timeout: ctx.timeout,
-          id: id,
-          kind: :analyzer
+    cond do
+      not valid_id?(id) ->
+        error.(
+          reason_for(fallback.kind),
+          "id/0 must return a non-empty string (max #{@max_id_bytes} bytes)"
         )
 
-      ms = (System.monotonic_time(:microsecond) - t0) / 1000
-      meta = %{id: id, version: version, ms: ms}
-      outcome = analyzer_outcome(acc, result, meta, ctx)
+      not valid_version?(version) ->
+        error.(reason_for(fallback.kind), "version/0 must return an integer in 0..#{@max_version}")
 
-      case outcome do
-        {:ok, next} -> {:cont, {:ok, next}}
-        {:error, _} = e -> {:halt, e}
-      end
-    end)
-  end
+      MapSet.member?(ctx.native_ids, id) ->
+        error.(:conflict, "plugin id `#{id}` collides with a native extractor id")
 
-  defp analyzer_outcome(report, result, meta, ctx) do
-    case result do
-      {:ok, {:ok, patch}} when is_map(patch) ->
-        finish_patch(report, patch, :augment, meta, ctx)
-
-      {:ok, {:error, %Whiff.Error{} = err}} ->
-        handle_plugin_failure(report, err, meta, ctx.strict?)
-
-      {:ok, other} ->
-        err =
-          Whiff.Error.new(
-            :analyzer_error,
-            "analyzer returned unexpected value: #{inspect(other)}",
-            details: %{plugin: meta.id}
-          )
-
-        handle_plugin_failure(report, err, meta, ctx.strict?)
-
-      {:error, %Whiff.Error{} = err} ->
-        handle_plugin_failure(report, err, meta, ctx.strict?)
+      true ->
+        {:ok, %{fallback | id: id, version: version}}
     end
   end
 
-  defp finish_patch(report, patch, mode, meta, ctx) do
-    with {:ok, patch} <- Privacy.scrub_patch(patch, ctx.privacy),
-         {:ok, merged} <-
-           Merge.merge(report, patch,
+  defp valid_id?(id),
+    do: is_binary(id) and id != "" and byte_size(id) <= @max_id_bytes and String.valid?(id)
+
+  defp valid_version?(v), do: is_integer(v) and v >= 0 and v <= @max_version
+
+  defp timed(meta, fun, ctx) do
+    t0 = System.monotonic_time(:microsecond)
+    result = Plugin.run(fun, timeout: ctx.timeout, id: meta.id, kind: meta.kind)
+    {result, %{meta | ms: (System.monotonic_time(:microsecond) - t0) / 1000}}
+  end
+
+  defp outcome({result, meta}, report, owned, mode, ctx) do
+    case result do
+      {:ok, {:ok, patch}} when is_map(patch) ->
+        apply_patch(report, owned, patch, mode, meta, ctx)
+
+      {:ok, {:error, %Error{} = err}} ->
+        failure(report, owned, err, meta, ctx)
+
+      {:ok, other} ->
+        err =
+          Error.new(
+            reason_for(meta.kind),
+            "#{meta.kind} returned #{shape(other)}; expected {:ok, map} or {:error, %Whiff.Error{}}"
+          )
+
+        failure(report, owned, err, meta, ctx)
+
+      {:error, %Error{} = err} ->
+        failure(report, owned, err, meta, ctx)
+    end
+  end
+
+  defp apply_patch(report, owned, patch, mode, meta, ctx) do
+    with :ok <- Merge.validate_patch(patch),
+         {:ok, patch} <- Privacy.scrub_patch(patch, ctx.privacy),
+         {:ok, merged, written} <-
+           Merge.merge_tracked(report, patch,
              mode: mode,
              override_fields: ctx.override_fields,
              plugin_id: meta.id,
-             provenance: ctx.provenance?
+             provenance: ctx.provenance?,
+             owned: owned
            ) do
-      entry = %{
-        "id" => meta.id,
-        "version" => meta.version,
-        "ms" => meta.ms,
-        "status" => "ok"
-      }
-
-      {:ok, Report.append_extractor_diag(merged, entry)}
+      entry = %{"id" => meta.id, "version" => meta.version, "ms" => meta.ms, "status" => "ok"}
+      {:ok, Report.append_extractor_diag(merged, entry), MapSet.union(owned, MapSet.new(written))}
     else
-      {:error, %Whiff.Error{} = err} ->
-        handle_plugin_failure(report, err, meta, ctx.strict?)
+      {:error, %Error{} = err} -> failure(report, owned, err, meta, ctx)
     end
   end
 
-  defp handle_plugin_failure(_report, err, _meta, true), do: {:error, err}
+  defp failure(_report, _owned, %Error{} = err, meta, %{strict?: true} = ctx) do
+    {:error, %{sanitize(err, ctx) | details: Map.put(err.details, :plugin, meta.id)}}
+  end
 
-  defp handle_plugin_failure(report, err, meta, false) do
+  defp failure(report, owned, %Error{} = err, meta, ctx) do
+    err = sanitize(err, ctx)
+
     entry = %{
       "id" => meta.id,
       "version" => meta.version,
       "ms" => meta.ms,
       "status" => "error",
-      "error_kind" => to_string(err.reason),
+      "error_kind" => Atom.to_string(err.reason),
       "error" => err.message
     }
 
-    {:ok, Report.append_extractor_diag(report, entry)}
+    {:ok, Report.append_extractor_diag(report, entry), owned}
   end
 
-  defp safe_id(mod) do
-    Code.ensure_loaded(mod)
-
-    if function_exported?(mod, :id, 0), do: mod.id(), else: inspect(mod)
-  rescue
-    _ -> inspect(mod)
+  # Plugin-authored messages may carry extracted content.
+  defp sanitize(%Error{message: message} = err, ctx) do
+    message = if is_binary(message), do: message, else: ""
+    message = message |> Privacy.scrub_string(ctx.privacy) |> truncate()
+    %{err | message: message}
   end
 
-  defp safe_version(mod) do
-    Code.ensure_loaded(mod)
+  defp truncate(message) when byte_size(message) <= @max_error_bytes, do: message
 
-    if function_exported?(mod, :version, 0), do: mod.version(), else: 1
-  rescue
-    _ -> 1
+  defp truncate(message) do
+    cut = binary_part(message, 0, @max_error_bytes)
+    if String.valid?(cut), do: cut <> "...", else: String.slice(message, 0, 200) <> "..."
   end
+
+  defp shape(value) when is_tuple(value), do: "a tuple of size #{tuple_size(value)}"
+  defp shape(value) when is_map(value), do: "a map"
+  defp shape(value) when is_list(value), do: "a list"
+  defp shape(value) when is_binary(value), do: "a binary"
+  defp shape(value) when is_atom(value), do: "an atom"
+  defp shape(_value), do: "an unsupported term"
+
+  defp reason_for(:analyzer), do: :analyzer_error
+  defp reason_for(_), do: :extractor_error
 end

@@ -1,0 +1,91 @@
+{
+ "content": {},
+ "diagnostics": {
+  "elapsed_ms": 2.257,
+  "extractors": [
+   {
+    "id": "meta.mwg",
+    "ms": 0.002,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.language",
+    "ms": 0.001,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.excerpt",
+    "ms": 0.001,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.keywords",
+    "ms": 0.054,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.summary",
+    "ms": 0.0,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "temporal.range",
+    "ms": 0.001,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "privacy.scan",
+    "ms": 0.002,
+    "status": "ok",
+    "version": 1
+   }
+  ],
+  "truncated": false
+ },
+ "format": {},
+ "identification": {
+  "candidates": [
+   {
+    "confidence": 0.35,
+    "format": "binary"
+   }
+  ],
+  "confidence": 1.0,
+  "detected_by": "heuristic",
+  "extractor": null,
+  "format": "empty",
+  "mime": "inode/x-empty",
+  "name": "Empty file"
+ },
+ "integrity": {
+  "blake3": "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+ },
+ "metadata": {},
+ "physical": {
+  "size_bytes": 0
+ },
+ "rights": {},
+ "security": {},
+ "source": {
+  "extension": "bin",
+  "name": "empty.bin",
+  "stem": "empty"
+ },
+ "system": {
+  "kind": "regular",
+  "size_bytes": 0
+ },
+ "temporal": {},
+ "whiff": {
+  "profile": "standard",
+  "schema": "whiff/1",
+  "version": "0.8.0"
+ }
+}
