@@ -1,1 +1,0 @@
-{application,trade_whiffer,[{modules,['Elixir.TradeWhiffer']},{optional_applications,[rustler]},{applications,[kernel,stdlib,elixir,logger,whiff,rustler]},{description,"trade_whiffer"},{registered,[]},{vsn,"0.1.0"}]}.
