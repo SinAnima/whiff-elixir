@@ -76,6 +76,61 @@ defmodule Whiff.ScratchTest do
     assert entries(scratch) == []
   end
 
+  # The staged copy is a new inode with one link, and native reports times in
+  # nanoseconds. A hard-linked original with an old mtime shows that inode,
+  # links, and modified come from the original, not the copy.
+  @tag :unix
+  test "a staged report takes inode, links, and modified from the original", %{scratch: scratch} do
+    dir = Path.join(scratch <> "-src", "data")
+    File.mkdir_p!(dir)
+    original = Path.join(dir, "doc.txt")
+    File.write!(original, "staged inode test\n")
+    File.ln!(original, Path.join(dir, "doc-link.txt"))
+    File.touch!(original, 1_000_000_000)
+
+    try do
+      stat = File.stat!(original, time: :posix)
+      {:ok, report} = Whiff.extract(original, stage: :local, hashes: :none)
+
+      assert report["system"]["inode"] == stat.inode
+      assert report["system"]["device"] == stat.major_device
+      assert report["system"]["links"] == 2
+      assert report["temporal"]["filesystem"]["modified"] == "2001-09-09T01:46:40Z"
+      refute Map.has_key?(report["temporal"]["filesystem"], "created")
+    after
+      File.rm_rf!(scratch <> "-src")
+    end
+  end
+
+  test "restore_report overwrites copy fields with the original's stat" do
+    stat = File.stat!(@fixture, time: :posix)
+
+    report = %{
+      "source" => %{"path" => "/scratch/whiff-x/hello.txt"},
+      "temporal" => %{
+        "filesystem" => %{
+          "modified" => "1999-01-01T00:00:00.123456789Z",
+          "created" => "1999-01-01T00:00:00Z"
+        }
+      },
+      "system" => %{"device" => -1, "inode" => -1, "links" => 99, "sparse" => true},
+      "diagnostics" => %{}
+    }
+
+    restored = Scratch.restore_report(report, {:staged, @fixture, "/scratch/whiff-x/hello.txt"})
+
+    assert restored["source"]["path"] == @fixture
+    assert restored["system"]["device"] == stat.major_device
+    assert restored["system"]["inode"] == stat.inode
+    assert restored["system"]["links"] == stat.links
+    refute Map.has_key?(restored["system"], "sparse")
+
+    assert restored["temporal"]["filesystem"]["modified"] ==
+             stat.mtime |> DateTime.from_unix!() |> DateTime.to_iso8601()
+
+    refute Map.has_key?(restored["temporal"]["filesystem"], "created")
+  end
+
   test "errors refer to the original path" do
     tag = {:staged, "/data/a.txt", "/scratch/whiff-x/a.txt"}
 
