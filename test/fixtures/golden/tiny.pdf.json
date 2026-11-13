@@ -1,0 +1,129 @@
+{
+ "content": {},
+ "diagnostics": {
+  "elapsed_ms": 6.325,
+  "extractors": [
+   {
+    "id": "doc.pdf",
+    "ms": 0.089,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "meta.mwg",
+    "ms": 0.002,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.language",
+    "ms": 0.0,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.excerpt",
+    "ms": 0.001,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.keywords",
+    "ms": 0.047,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.summary",
+    "ms": 0.0,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "temporal.range",
+    "ms": 0.001,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "privacy.scan",
+    "ms": 3.977,
+    "status": "ok",
+    "version": 1
+   }
+  ],
+  "truncated": false,
+  "warnings": [
+   "doc.pdf: cross-reference data: malformed: object at offset 178; rebuilding"
+  ]
+ },
+ "format": {
+  "pdf": {
+   "objects": 3,
+   "page_sizes": [
+    {
+     "height_mm": 1.1,
+     "height_pt": 3.0,
+     "orientation": "portrait",
+     "pages": 1,
+     "width_mm": 1.1,
+     "width_pt": 3.0
+    }
+   ],
+   "pages_with_text": 0,
+   "repaired": true,
+   "version": "1.1"
+  }
+ },
+ "identification": {
+  "confidence": 0.85,
+  "detected_by": "magic",
+  "encoding": "us-ascii",
+  "extension_matches": true,
+  "extractor": "doc.pdf",
+  "family": "doc.pdf",
+  "format": "pdf",
+  "mime": "application/pdf",
+  "name": "PDF document"
+ },
+ "integrity": {
+  "blake3": "8d68c366fad72f55e8ac07dff3ef3b3b342397d8ff0a659dc6c5b0a35d9003e1",
+  "sha256": "633957e19d1a2905968c247d67fd86ff15fadcc3e4fdd20b9f689091ab1cf1c6"
+ },
+ "metadata": {},
+ "physical": {
+  "document": {
+   "pages": 1
+  },
+  "entropy": 4.615,
+  "entropy_scope": "file",
+  "size_bytes": 318,
+  "text": {
+   "blank_lines": 0,
+   "bom": false,
+   "bytes": 318,
+   "chars": 318,
+   "line_endings": "lf",
+   "lines": 14,
+   "max_line_length": 64,
+   "words": 64
+  }
+ },
+ "rights": {},
+ "security": {},
+ "source": {
+  "extension": "pdf",
+  "name": "tiny.pdf",
+  "stem": "tiny"
+ },
+ "system": {
+  "kind": "regular",
+  "size_bytes": 318
+ },
+ "temporal": {},
+ "whiff": {
+  "profile": "standard",
+  "schema": "whiff/1",
+  "version": "0.8.0"
+ }
+}

@@ -1,0 +1,118 @@
+{
+ "content": {
+  "excerpt": "Contact [redacted:email] or [redacted:phone]. Card [redacted:payment_card]."
+ },
+ "diagnostics": {
+  "elapsed_ms": 6.826,
+  "extractors": [
+   {
+    "id": "text.plain",
+    "ms": 1.02,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "meta.mwg",
+    "ms": 0.002,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.language",
+    "ms": 0.001,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.excerpt",
+    "ms": 0.002,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.keywords",
+    "ms": 0.042,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.summary",
+    "ms": 0.0,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "temporal.range",
+    "ms": 0.001,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "privacy.scan",
+    "ms": 3.901,
+    "status": "ok",
+    "version": 1
+   }
+  ],
+  "truncated": false
+ },
+ "format": {
+  "text": {
+   "paragraphs": 1
+  }
+ },
+ "identification": {
+  "confidence": 0.35,
+  "detected_by": "extension",
+  "encoding": "us-ascii",
+  "extension_matches": true,
+  "extractor": "text.plain",
+  "family": "text.plain",
+  "format": "text",
+  "mime": "text/plain",
+  "name": "Plain text"
+ },
+ "integrity": {
+  "blake3": "415869c7936810f8d26accd5c2418bd75400789fb5f97b6317901d2b189c0c80",
+  "sha256": "0e24b04815fc0fac689dc32212a19d3f026267a838b5821eeb1b9cfd3fa6c41c"
+ },
+ "metadata": {},
+ "physical": {
+  "entropy": 4.086,
+  "entropy_scope": "file",
+  "size_bytes": 75,
+  "text": {
+   "blank_lines": 0,
+   "bom": false,
+   "bytes": 75,
+   "chars": 75,
+   "line_endings": "lf",
+   "lines": 2,
+   "max_line_length": 48,
+   "words": 12
+  }
+ },
+ "rights": {},
+ "security": {
+  "personal_data": {
+   "email": 1,
+   "payment_card": 1,
+   "phone": 1
+  }
+ },
+ "source": {
+  "extension": "txt",
+  "name": "pii.txt",
+  "stem": "pii"
+ },
+ "system": {
+  "kind": "regular",
+  "size_bytes": 75
+ },
+ "temporal": {},
+ "whiff": {
+  "profile": "standard",
+  "schema": "whiff/1",
+  "version": "0.8.0"
+ }
+}

@@ -1,0 +1,328 @@
+{
+ "content": {},
+ "diagnostics": {
+  "elapsed_ms": 6.686,
+  "extractors": [
+   {
+    "id": "archive.zip",
+    "ms": 0.037,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "meta.mwg",
+    "ms": 0.001,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.language",
+    "ms": 0.0,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.excerpt",
+    "ms": 0.001,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.keywords",
+    "ms": 0.033,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.summary",
+    "ms": 0.0,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "temporal.range",
+    "ms": 0.001,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "privacy.scan",
+    "ms": 0.005,
+    "status": "ok",
+    "version": 1
+   }
+  ],
+  "limits_hit": [
+   "max_depth"
+  ],
+  "truncated": true
+ },
+ "embedded": [
+  {
+   "content": {},
+   "diagnostics": {
+    "elapsed_ms": 4.066,
+    "extractors": [
+     {
+      "id": "archive.zip",
+      "ms": 0.015,
+      "status": "ok",
+      "version": 1
+     },
+     {
+      "id": "meta.mwg",
+      "ms": 0.002,
+      "status": "ok",
+      "version": 1
+     },
+     {
+      "id": "text.language",
+      "ms": 0.001,
+      "status": "ok",
+      "version": 1
+     },
+     {
+      "id": "text.excerpt",
+      "ms": 0.001,
+      "status": "ok",
+      "version": 1
+     },
+     {
+      "id": "text.keywords",
+      "ms": 0.047,
+      "status": "ok",
+      "version": 1
+     },
+     {
+      "id": "text.summary",
+      "ms": 0.0,
+      "status": "ok",
+      "version": 1
+     },
+     {
+      "id": "temporal.range",
+      "ms": 0.003,
+      "status": "ok",
+      "version": 1
+     },
+     {
+      "id": "privacy.scan",
+      "ms": 3.888,
+      "status": "ok",
+      "version": 1
+     }
+    ],
+    "limits_hit": [
+     "max_depth"
+    ],
+    "truncated": true
+   },
+   "embedded": [
+    {
+     "content": {},
+     "diagnostics": {
+      "elapsed_ms": 0.0,
+      "truncated": false,
+      "warnings": [
+       "not analysed: max_depth reached"
+      ]
+     },
+     "format": {},
+     "identification": {
+      "confidence": 0.0,
+      "detected_by": "none",
+      "extractor": null,
+      "format": "",
+      "mime": "",
+      "name": ""
+     },
+     "integrity": {},
+     "metadata": {},
+     "physical": {},
+     "rights": {},
+     "security": {},
+     "source": {
+      "extension": "txt",
+      "name": "inner.txt",
+      "stem": "inner"
+     },
+     "system": {
+      "kind": "memory",
+      "size_bytes": 7
+     },
+     "temporal": {
+      "filesystem": {}
+     },
+     "whiff": {
+      "profile": "standard",
+      "schema": "whiff/1",
+      "version": "0.8.0"
+     }
+    }
+   ],
+   "format": {
+    "zip": {
+     "compressed_bytes": 7,
+     "created_on": "Unix",
+     "entries": [
+      {
+       "mode": "644",
+       "modified": "2026-11-13T02:53:39Z",
+       "path": "inner.txt",
+       "size_bytes": 7
+      }
+     ],
+     "file_types": {
+      "txt": 1
+     },
+     "files": 1,
+     "methods": {
+      "stored": 1
+     },
+     "modified_range": [
+      "2026-11-13T02:53:39Z",
+      "2026-11-13T02:53:39Z"
+     ],
+     "top_level": [
+      "inner.txt"
+     ]
+    }
+   },
+   "identification": {
+    "confidence": 0.55,
+    "detected_by": "sniff",
+    "extension_matches": true,
+    "extractor": "archive.zip",
+    "family": "archive",
+    "format": "zip",
+    "mime": "application/zip",
+    "name": "ZIP archive"
+   },
+   "integrity": {
+    "blake3": "61881c93323fef0e9c5765ed70cc8b1df36d806e2dd9b8711b4589a026530c8a",
+    "sha256": "7cf3425b13e261bff5a5e7175634add9511dce4af2039fa127660f89a387fcab"
+   },
+   "metadata": {},
+   "physical": {
+    "container": {
+     "entries": 1,
+     "ratio": 0.04,
+     "uncompressed_bytes": 7
+    },
+    "entropy": 4.009,
+    "entropy_scope": "file",
+    "size_bytes": 175
+   },
+   "rights": {},
+   "security": {},
+   "source": {
+    "extension": "zip",
+    "name": "inner.zip",
+    "stem": "inner"
+   },
+   "system": {
+    "kind": "memory",
+    "size_bytes": 175
+   },
+   "temporal": {
+    "content": [
+     {
+      "field": "modified",
+      "source": "archive.zip",
+      "tz_known": true,
+      "value": "2026-11-13T02:53:39Z"
+     }
+    ],
+    "earliest": "2026-11-13T02:53:39Z",
+    "filesystem": {},
+    "latest": "2026-11-13T02:53:39Z"
+   },
+   "whiff": {
+    "profile": "standard",
+    "schema": "whiff/1",
+    "version": "0.8.0"
+   }
+  }
+ ],
+ "format": {
+  "zip": {
+   "compressed_bytes": 175,
+   "created_on": "Unix",
+   "entries": [
+    {
+     "mode": "644",
+     "modified": "2026-11-13T02:53:39Z",
+     "path": "inner.zip",
+     "size_bytes": 175
+    }
+   ],
+   "file_types": {
+    "zip": 1
+   },
+   "files": 1,
+   "methods": {
+    "stored": 1
+   },
+   "modified_range": [
+    "2026-11-13T02:53:39Z",
+    "2026-11-13T02:53:39Z"
+   ],
+   "top_level": [
+    "inner.zip"
+   ]
+  }
+ },
+ "identification": {
+  "confidence": 0.55,
+  "detected_by": "sniff",
+  "extension_matches": true,
+  "extractor": "archive.zip",
+  "family": "archive",
+  "format": "zip",
+  "mime": "application/zip",
+  "name": "ZIP archive"
+ },
+ "integrity": {
+  "blake3": "3fe66c15d4837baf7bd195cfd402a5cf5ab974a9feebf11b3504f18269f88571",
+  "sha256": "326d7e61ccd02cd466d6075159c20c9ab0d2101691c792fd0d58afd5ea7207dc"
+ },
+ "metadata": {},
+ "physical": {
+  "container": {
+   "entries": 1,
+   "ratio": 0.5102040816326531,
+   "uncompressed_bytes": 175
+  },
+  "entropy": 4.065,
+  "entropy_scope": "file",
+  "size_bytes": 343
+ },
+ "rights": {},
+ "security": {},
+ "source": {
+  "extension": "zip",
+  "name": "nested.zip",
+  "stem": "nested"
+ },
+ "system": {
+  "kind": "regular",
+  "size_bytes": 343
+ },
+ "temporal": {
+  "content": [
+   {
+    "field": "modified",
+    "source": "archive.zip",
+    "tz_known": true,
+    "value": "2026-11-13T02:53:39Z"
+   }
+  ],
+  "earliest": "2026-11-13T02:53:39Z",
+  "latest": "2026-11-13T02:53:39Z"
+ },
+ "whiff": {
+  "profile": "standard",
+  "schema": "whiff/1",
+  "version": "0.8.0"
+ }
+}

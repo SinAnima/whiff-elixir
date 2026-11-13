@@ -6,138 +6,145 @@ defmodule WhiffTest do
   doctest Whiff
 
   @fixture Path.expand("fixtures/hello.txt", __DIR__)
+  @missing Path.expand("fixtures/missing.txt", __DIR__)
 
-  test "schema_version/0" do
-    assert Whiff.schema_version() == "whiff/1"
+  test "version/0 matches mix.exs" do
+    assert Whiff.version() == Mix.Project.config()[:version]
   end
 
-  test "version/0 returns a semver-ish string" do
-    assert Whiff.version() =~ ~r/\d+\.\d+\.\d+/
+  test "native_version reports the locked crate version and schema" do
+    {:ok, json} = Whiff.Native.native_version()
+    info = Jason.decode!(json)
+
+    assert info["whiff"] == Whiff.version()
+    assert info["schema"] == "whiff/1"
+    assert info["crate"] =~ ~r/^\d+\.\d+\.\d+$/
   end
 
-  test "extract/2 returns string-keyed map for text fixture" do
+  test "extract/2 returns a string-keyed report" do
     assert {:ok, report} = Whiff.extract(@fixture)
-    assert is_map(report)
     assert report["whiff"]["schema"] == "whiff/1"
-    assert is_binary(report["identification"]["format"])
-    refute Map.keys(report) |> Enum.any?(&is_atom/1)
+    assert report["identification"]["format"] == "text"
+    assert all_string_keys?(report)
   end
 
-  test "extract!/2 returns report or raises Whiff.Error" do
-    report = Whiff.extract!(@fixture)
-    assert report["whiff"]["schema"] == "whiff/1"
+  defp all_string_keys?(map) when is_map(map),
+    do: Enum.all?(map, fn {k, v} -> is_binary(k) and all_string_keys?(v) end)
 
-    assert_raise Whiff.Error, fn ->
-      Whiff.extract!("/definitely/missing-whiff-#{System.unique_integer([:positive])}.bin")
+  defp all_string_keys?(list) when is_list(list), do: Enum.all?(list, &all_string_keys?/1)
+  defp all_string_keys?(_), do: true
+
+  test "bang and non-bang return the same error struct" do
+    assert {:error, %Whiff.Error{reason: :enoent} = err} = Whiff.extract(@missing)
+    assert ^err = assert_raise(Whiff.Error, fn -> Whiff.extract!(@missing) end)
+
+    assert {:error, binary_err} = Whiff.extract_binary("x", nope: 1)
+    assert ^binary_err = assert_raise(Whiff.Error, fn -> Whiff.extract_binary!("x", nope: 1) end)
+
+    assert {:error, llm_err} = Whiff.llm(@missing)
+    assert ^llm_err = assert_raise(Whiff.Error, fn -> Whiff.llm!(@missing) end)
+  end
+
+  test "malformed option shapes return errors, never raise" do
+    for opts <- [[:foo], [1], [limits: [1]], [{"profile", :full}]] do
+      assert {:error, %Whiff.Error{reason: :invalid_option}} = Whiff.extract(@fixture, opts)
+      assert {:error, %Whiff.Error{reason: :invalid_option}} = Whiff.extract_binary("x", opts)
+      assert {:error, %Whiff.Error{reason: :invalid_option}} = Whiff.llm(@fixture, opts)
+      assert {:error, %Whiff.Error{reason: :invalid_option}} = Whiff.extract_many([@fixture], opts)
+    end
+
+    assert {:error, %Whiff.Error{reason: :invalid_option}} = Whiff.extract(@fixture, %{})
+  end
+
+  test "a corrupt file is a report with diagnostics, not an error" do
+    assert {:ok, report} =
+             Whiff.extract(Path.expand("fixtures/corrupt.pdf", __DIR__), hashes: :none)
+
+    assert report["identification"]["format"] == "pdf"
+    assert Enum.any?(report["diagnostics"]["extractors"], &(&1["status"] == "error"))
+  end
+
+  test "llm/2 returns a projection smaller than the report" do
+    {:ok, report} = Whiff.extract(@fixture)
+    {:ok, view} = Whiff.llm(@fixture, tokens: 100)
+    assert byte_size(Jason.encode!(view)) < byte_size(Jason.encode!(report))
+  end
+
+  describe "extract_many/2" do
+    test "collects every result in input order" do
+      paths = [@fixture, @missing, 123]
+
+      assert {:ok, [first, second, third]} =
+               Whiff.extract_many(paths, hashes: :none, max_concurrency: 3)
+
+      assert {@fixture, {:ok, %{"whiff" => _}}} = first
+      assert {@missing, {:error, %Whiff.Error{reason: :enoent, path: @missing}}} = second
+      assert {123, {:error, %Whiff.Error{reason: :unsupported_input}}} = third
+    end
+
+    test ":halt returns the first error with completed pairs" do
+      assert {:error, %Whiff.Error{reason: :enoent, path: @missing, details: %{partial: partial}}} =
+               Whiff.extract_many([@fixture, @missing, @fixture],
+                 on_error: :halt,
+                 max_concurrency: 1
+               )
+
+      assert [{@fixture, {:ok, _}}] = partial
+    end
+
+    test ":halt with no errors returns every pair" do
+      assert {:ok, [{@fixture, {:ok, _}}, {@fixture, {:ok, _}}]} =
+               Whiff.extract_many([@fixture, @fixture], on_error: :halt, hashes: :none)
+    end
+
+    test "a path over :timeout is killed and reported with its path" do
+      slow = Path.expand("fixtures/hang.slow", __DIR__)
+
+      assert {:ok, [{^slow, {:error, %Whiff.Error{reason: :timeout, path: ^slow}}}]} =
+               Whiff.extract_many([slow],
+                 extractors: [Whiff.Test.SlowExtractor],
+                 plugin_timeout_ms: 5_000,
+                 timeout: 100
+               )
     end
   end
 
-  test "missing file returns :enoent" do
-    path = "/tmp/whiff-missing-#{System.unique_integer([:positive])}.bin"
-    assert {:error, %Whiff.Error{reason: :enoent}} = Whiff.extract(path)
-  end
-
-  test "extract_binary/2 with name" do
-    bytes = File.read!(@fixture)
-    assert {:ok, report} = Whiff.extract_binary(bytes, name: "hello.txt")
-    assert report["identification"]["format"]
-  end
-
-  test "llm/2 returns compact projection" do
-    assert {:ok, compact} = Whiff.llm(@fixture, tokens: 800)
-    assert is_map(compact)
-  end
-
-  test "llm!/2 and extract_binary!/2 bang variants" do
-    assert is_map(Whiff.llm!(@fixture, tokens: 800))
-    assert is_map(Whiff.extract_binary!(File.read!(@fixture), name: "hello.txt"))
-
-    assert_raise Whiff.Error, fn -> Whiff.llm!(123) end
-    assert_raise Whiff.Error, fn -> Whiff.extract_binary!(123) end
-  end
-
-  test "rejects non-binary extract paths and extract_many bad args" do
-    assert {:error, %Whiff.Error{reason: :unsupported_input}} = Whiff.extract(123)
-    assert {:error, %Whiff.Error{reason: :unsupported_input}} = Whiff.extract_binary(123)
-    assert {:error, %Whiff.Error{reason: :unsupported_input}} = Whiff.extract_many("nope")
-    assert {:error, %Whiff.Error{reason: :unsupported_input}} = Whiff.llm(123)
-
-    assert {:error, %Whiff.Error{reason: :invalid_option}} =
-             Whiff.extract_binary("x", name: :atom)
-  end
-
-  test "Error.message includes path when present" do
-    err = Whiff.Error.new(:enoent, "gone", path: "/tmp/x")
-    assert Exception.message(err) =~ "path: /tmp/x"
-    assert Exception.message(Whiff.Error.new(:native_error, "x")) == "native_error: x"
-  end
-
-  test "extract_many collect returns path/result pairs" do
-    missing = "/tmp/whiff-missing-collect-#{System.unique_integer([:positive])}.bin"
-
-    assert {:ok, pairs} =
-             Whiff.extract_many([@fixture, missing], on_error: :collect, hashes: :none)
-
-    assert length(pairs) == 2
-    assert match?({@fixture, {:ok, _}}, hd(pairs))
-    assert match?({^missing, {:error, %Whiff.Error{reason: :enoent}}}, List.last(pairs))
-  end
-
-  test "extract_many halt stops on first error" do
-    missing = "/tmp/whiff-missing-halt-#{System.unique_integer([:positive])}.bin"
-
-    assert {:error, %Whiff.Error{reason: :enoent, details: details}} =
-             Whiff.extract_many([@fixture, missing], on_error: :halt, hashes: :none)
-
-    assert is_list(details[:partial])
-  end
-
-  test "rejects unknown options" do
-    assert {:error, %Whiff.Error{reason: :invalid_option}} =
-             Whiff.extract(@fixture, nope: true)
-  end
-
-  test "rejects invalid profile" do
-    assert {:error, %Whiff.Error{reason: :invalid_option}} =
-             Whiff.extract(@fixture, profile: :turbo)
-  end
-
-  test "bang and non-bang share Whiff.Error" do
-    path = "/tmp/whiff-missing-bang-#{System.unique_integer([:positive])}.bin"
-    assert {:error, %Whiff.Error{reason: reason} = err} = Whiff.extract(path)
-
-    raised =
-      assert_raise Whiff.Error, fn ->
-        Whiff.extract!(path)
-      end
-
-    assert raised.reason == reason
-    assert raised.__struct__ == err.__struct__
-  end
-
-  test "partial diagnostics remain ok" do
-    assert {:ok, report} = Whiff.extract(@fixture, profile: :minimal)
-    assert is_map(report["diagnostics"])
-  end
-
-  test "scheduler stays responsive under concurrent extract", %{async: _} do
+  test "regular schedulers stay responsive during heavy native work" do
+    big = Path.join(System.tmp_dir!(), "whiff-big-#{System.unique_integer([:positive])}.bin")
+    File.write!(big, :crypto.strong_rand_bytes(32 * 1024 * 1024))
     parent = self()
 
-    ping =
-      Task.async(fn ->
-        Enum.each(1..20, fn i ->
-          send(parent, {:ping, i})
-          Process.sleep(5)
+    try do
+      pinger =
+        spawn_link(fn ->
+          gaps =
+            Enum.map(1..100, fn _ ->
+              t0 = System.monotonic_time(:millisecond)
+              Process.sleep(2)
+              System.monotonic_time(:millisecond) - t0
+            end)
+
+          send(parent, {:gaps, gaps})
         end)
-      end)
 
-    extract =
-      Task.async(fn ->
-        Enum.map(1..4, fn _ -> Whiff.extract(@fixture) end)
-      end)
+      tasks = for _ <- 1..4, do: Task.async(fn -> Whiff.extract(big, hashes: :all) end)
+      assert Enum.all?(Task.await_many(tasks, 60_000), &match?({:ok, _}, &1))
+      assert_receive {:gaps, gaps}, 10_000
 
-    assert Enum.all?(Task.await(extract, 60_000), &match?({:ok, _}, &1))
-    Task.await(ping, 5_000)
-    assert_received {:ping, 1}
+      assert Enum.max(gaps) < 100,
+             "max scheduler gap #{Enum.max(gaps)}ms (pinger #{inspect(pinger)})"
+    after
+      File.rm(big)
+    end
+  end
+
+  test "a large binary is not retained in the report or in errors" do
+    bytes = :crypto.strong_rand_bytes(16 * 1024 * 1024)
+
+    assert {:ok, report} = Whiff.extract_binary(bytes, name: "blob.bin", hashes: :none)
+    assert byte_size(:erlang.term_to_binary(report)) < 1024 * 1024
+
+    assert {:error, err} = Whiff.extract_binary(bytes, nope: 1)
+    assert byte_size(:erlang.term_to_binary(err)) < 1024
   end
 end

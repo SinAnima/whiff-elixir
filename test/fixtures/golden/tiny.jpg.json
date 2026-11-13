@@ -1,0 +1,124 @@
+{
+ "content": {},
+ "diagnostics": {
+  "elapsed_ms": 7.285,
+  "extractors": [
+   {
+    "id": "image.jpeg",
+    "ms": 0.036,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "meta.mwg",
+    "ms": 0.002,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.language",
+    "ms": 0.005,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.excerpt",
+    "ms": 0.001,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.keywords",
+    "ms": 0.052,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "text.summary",
+    "ms": 0.0,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "temporal.range",
+    "ms": 0.001,
+    "status": "ok",
+    "version": 1
+   },
+   {
+    "id": "privacy.scan",
+    "ms": 3.866,
+    "status": "ok",
+    "version": 1
+   }
+  ],
+  "truncated": false
+ },
+ "format": {
+  "jpeg": {
+   "huffman_tables": 1,
+   "jfif": {
+    "density": [
+     1,
+     1
+    ],
+    "units": 0,
+    "version": "1.01"
+   },
+   "process": "baseline",
+   "progressive": false,
+   "quality_estimate": 75,
+   "segments": [
+    "APP0 JFIF",
+    "DQT",
+    "SOF0",
+    "DHT",
+    "SOS"
+   ]
+  }
+ },
+ "identification": {
+  "confidence": 0.77,
+  "detected_by": "magic",
+  "extension_matches": true,
+  "extractor": "image.jpeg",
+  "family": "image.raster",
+  "format": "jpeg",
+  "mime": "image/jpeg",
+  "name": "JPEG image"
+ },
+ "integrity": {
+  "blake3": "dec841aa6973c51e8b2fce283ac774f4edb5ef79cc488a77ab9d4a09aa5606d3",
+  "sha256": "759447324684c26f124942bc73b3b7f2becc46f656ea4db9834fb5cb1d608c0f"
+ },
+ "metadata": {},
+ "physical": {
+  "entropy": 5.009,
+  "entropy_scope": "file",
+  "image": {
+   "bit_depth": 8,
+   "channels": 1,
+   "color_space": "Gray",
+   "height": 1,
+   "width": 1
+  },
+  "size_bytes": 150
+ },
+ "rights": {},
+ "security": {},
+ "source": {
+  "extension": "jpg",
+  "name": "tiny.jpg",
+  "stem": "tiny"
+ },
+ "system": {
+  "kind": "regular",
+  "size_bytes": 150
+ },
+ "temporal": {},
+ "whiff": {
+  "profile": "standard",
+  "schema": "whiff/1",
+  "version": "0.8.0"
+ }
+}

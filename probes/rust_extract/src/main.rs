@@ -10,8 +10,42 @@ fn fixture_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/hello.txt")
 }
 
+/// `--golden <file>`: print the report with the Elixir wrapper's default
+/// options (standard profile, default hashes, strict privacy) as compact JSON.
+/// Used to regenerate `test/fixtures/golden/*.json`.
+fn golden(path: &str) -> ExitCode {
+    let engine = Engine::builder().build();
+    match engine.extract_path(path) {
+        Ok(report) => match serde_json::to_string(&report) {
+            Ok(json) => {
+                println!("{json}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("serialize failed: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        Err(err) => {
+            eprintln!("extract_path failed: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
-    let path = env::args().nth(1).map(PathBuf::from).unwrap_or_else(fixture_path);
+    let args: Vec<String> = env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--golden") {
+        return match args.get(2) {
+            Some(path) => golden(path),
+            None => {
+                eprintln!("usage: rust_extract --golden <file>");
+                ExitCode::FAILURE
+            }
+        };
+    }
+
+    let path = args.get(1).map(PathBuf::from).unwrap_or_else(fixture_path);
 
     println!("whiff schema={}", whiff::SCHEMA);
     println!("enabled features={:?}", whiff::enabled_features());
@@ -41,13 +75,20 @@ fn main() -> ExitCode {
 
             let compact = report.llm_view(800);
             println!("--- llm_view(800) ---");
-            println!("{}", serde_json::to_string_pretty(&compact).unwrap_or_default());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&compact).unwrap_or_default()
+            );
 
             let missing = path.with_file_name("definitely-missing-whiff-probe.bin");
             match engine.extract_path(&missing) {
                 Err(Error::Io { path: p, source }) => {
                     println!("--- missing path ---");
-                    println!("path={} kind={:?} message={source}", p.display(), source.kind());
+                    println!(
+                        "path={} kind={:?} message={source}",
+                        p.display(),
+                        source.kind()
+                    );
                 }
                 Err(other) => println!("unexpected error for missing path: {other}"),
                 Ok(_) => println!("unexpected ok for missing path"),
@@ -62,8 +103,7 @@ fn main() -> ExitCode {
             println!("--- extract_bytes ---");
             println!(
                 "format={:?} truncated={}",
-                mem.identification.format,
-                mem.diagnostics.truncated
+                mem.identification.format, mem.diagnostics.truncated
             );
 
             ExitCode::SUCCESS

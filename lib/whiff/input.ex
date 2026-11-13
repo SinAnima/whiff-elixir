@@ -12,10 +12,11 @@ defmodule Whiff.Input do
   * `:source` — `:path` or `:binary`
   * `:path` — filesystem path when `source: :path`; otherwise `nil`
   * `:bytes` — payload when `source: :binary` (may be large; do not log it)
-  * `:filename` — basename used for detection and `supports?/2`
+  * `:filename` — file name used for `supports?/2`. For `:binary` inputs
+    without `:name`/`:filename` it is `"input.bin"`
   * `:extension` — lowercase extension including the dot (e.g. `".pdf"`), or `nil`
-  * `:mime` — optional caller-supplied MIME type
-  * `:size` — byte size when known; otherwise `nil`
+  * `:mime` — caller-supplied MIME type (`extract_binary/2` only), otherwise `nil`
+  * `:size` — byte size; `nil` when a path cannot be stat-ed
 
   ## Example
 
@@ -88,8 +89,11 @@ defmodule Whiff.Input do
   ## Examples
 
       iex> i = Whiff.Input.from_path("docs/notes.TXT")
-      iex> {i.source, i.filename, i.extension}
-      {:path, "notes.TXT", ".txt"}
+      iex> {i.source, i.filename, i.extension, i.size}
+      {:path, "notes.TXT", ".txt", nil}
+
+      iex> Whiff.Input.from_path("test/fixtures/hello.txt").size
+      18
   """
   @spec from_path(Path.t()) :: t()
   def from_path(path) when is_binary(path) do
@@ -112,13 +116,14 @@ defmodule Whiff.Input do
 
   * `bytes` — binary payload
   * `opts` — optional keywords:
-    * `:name` / `:filename` — basename for detection (default `"input.bin"`)
+    * `:name` or `:filename` (not both) — file name (default `"input.bin"`)
     * `:mime` — optional MIME string
 
   ## Returns
 
   * `%Whiff.Input{}` on success
-  * `{:error, %Whiff.Error{reason: :invalid_option}}` if `:name` / `:filename` is present but not a binary
+  * `{:error, %Whiff.Error{reason: :invalid_option}}` if `:name` / `:filename`
+    is not a binary, or both are given
   * `{:error, %Whiff.Error{reason: :unsupported_input}}` if `bytes` is not a binary
 
   ## Examples
@@ -126,6 +131,9 @@ defmodule Whiff.Input do
       iex> input = Whiff.Input.from_binary("TRADE/1\\nid=1\\n", name: "pos.trade")
       iex> match?(%Whiff.Input{source: :binary, extension: ".trade", size: 13}, input)
       true
+
+      iex> Whiff.Input.from_binary("x", name: "a.txt", filename: "b.txt")
+      {:error, %Whiff.Error{reason: :invalid_option, message: "pass either :name or :filename, not both", path: nil, details: %{}}}
 
       iex> Whiff.Input.from_binary("x", name: :bad)
       {:error, %Whiff.Error{reason: :invalid_option, message: "name must be a string", path: nil, details: %{}}}
@@ -139,19 +147,24 @@ defmodule Whiff.Input do
   def from_binary(bytes, opts) when is_binary(bytes) and is_list(opts) do
     filename = Keyword.get(opts, :name) || Keyword.get(opts, :filename)
 
-    if not is_nil(filename) and not is_binary(filename) do
-      {:error, Whiff.Error.new(:invalid_option, "name must be a string")}
-    else
-      filename = filename || "input.bin"
+    cond do
+      Keyword.has_key?(opts, :name) and Keyword.has_key?(opts, :filename) ->
+        {:error, Whiff.Error.new(:invalid_option, "pass either :name or :filename, not both")}
 
-      %__MODULE__{
-        source: :binary,
-        bytes: bytes,
-        filename: filename,
-        extension: extension_of(filename),
-        mime: Keyword.get(opts, :mime),
-        size: byte_size(bytes)
-      }
+      not is_nil(filename) and not is_binary(filename) ->
+        {:error, Whiff.Error.new(:invalid_option, "name must be a string")}
+
+      true ->
+        filename = filename || "input.bin"
+
+        %__MODULE__{
+          source: :binary,
+          bytes: bytes,
+          filename: filename,
+          extension: extension_of(filename),
+          mime: Keyword.get(opts, :mime),
+          size: byte_size(bytes)
+        }
     end
   end
 

@@ -2,50 +2,108 @@ defmodule Whiff do
   @moduledoc """
   Elixir wrapper around the Rust [whiff](https://github.com/baoulo/whiff) crate.
 
-  Non-bang functions return `{:ok, report}` or `{:error, %Whiff.Error{}}`.
-  Reports are **string-keyed** maps conforming to schema `whiff/1`.
-  Bang variants raise `%Whiff.Error{}`.
+  `extract/2` and `extract_binary/2` return a `whiff/1` report: a map with
+  string keys describing what a file is (identification), its hashes
+  (integrity), security and rights signals, content, and format metadata.
 
-  Native identification and extraction run in the NIF. Elixir extractors
-  (`Whiff.Extractor`) and analyzers (`Whiff.Analyzer`) run in BEAM processes
-  and merge patches via `Whiff.Merge`.
+  Non-bang functions return `{:ok, value}` or `{:error, %Whiff.Error{}}` and do
+  not raise. Bang functions return the value or raise the same
+  `%Whiff.Error{}`.
+
+  Native identification and extraction run in a NIF on the DirtyCpu
+  scheduler. Elixir extractors (`Whiff.Extractor`) and analyzers
+  (`Whiff.Analyzer`) run afterwards in isolated BEAM processes, and their
+  patches are merged by `Whiff.Merge`.
+
+  ## Options
+
+  Each function lists the options it accepts. An option a function does not
+  use is rejected with `:invalid_option`.
+
+  Native options (all extract and LLM functions):
+
+  | Option | Values | Default |
+  |---|---|---|
+  | `:profile` | `:minimal`, `:standard`, `:full`, `:llm` | `:standard` |
+  | `:hashes` | `:all`, `:none`, or a non-empty list of `:sha256` / `:blake3` | upstream default (`:all`) |
+  | `:privacy` | `:strict`, `:off`. `:off` reports personal data unredacted and disables the Elixir patch scrub | `:strict` |
+  | `:only` | extractor ids or groups to run exclusively, for example `["text.plain"]` | all |
+  | `:skip` | extractor ids or groups never to run, for example `["text.keywords"]` | none |
+  | `:format` | force a format id instead of detecting, for example `"pdf"` | detect |
+  | `:provenance` | record which extractor set each field in `diagnostics.provenance` | `false` |
+  | `:limits` | keyword list, see below | profile limits |
+
+  `:limits` keys (native engine only; Elixir plugins use `:plugin_timeout_ms`):
+
+  | Key | Range |
+  |---|---|
+  | `:max_read_bytes`, `:max_decompressed_bytes` | 1..4 GiB |
+  | `:hash_max_bytes` | 0..4 GiB (0 = never hash) |
+  | `:max_parse_bytes` | 0..256 MiB |
+  | `:max_text_bytes` | 0..64 MiB |
+  | `:max_depth` | 0..8 (0 = no recursion into children) |
+  | `:max_children` | 0..500 |
+  | `:file_timeout_ms`, `:extractor_timeout_ms` | 1..600_000 |
+
+  Plugin options (`extract/2`, `extract_binary/2`, `extract_many/2`):
+
+  | Option | Values | Default |
+  |---|---|---|
+  | `:mode` | `:fallback`, `:augment`, `:override` | `:fallback` |
+  | `:extractors` | modules implementing `Whiff.Extractor`; replaces `config :whiff, extractors:` | app config |
+  | `:analyzers` | modules implementing `Whiff.Analyzer`; replaces `config :whiff, analyzers:` | app config |
+  | `:strict` | `true` turns the first plugin failure into `{:error, _}` | `false` |
+  | `:plugin_timeout_ms` | 1..600_000 per callback | `5000` |
+  | `:override_fields` | dotted paths `:override` may replace, for example `["content.title"]` | `[]` |
+
+  Modes:
+
+  * `:fallback` runs an extractor only when native extraction did not cover
+    the file (see `Whiff.Report.native_covered?/1`). Native IO errors such as
+    `:eacces` are returned and never trigger a fallback.
+  * `:augment` runs supporting extractors after native extraction and adds
+    fields without replacing native values.
+  * `:override` runs supporting extractors and replaces the paths listed in
+    `:override_fields`. `whiff`, `integrity`, `embedded`, and existing
+    `security` values are never replaced.
 
   ## Quick start
 
-      iex> Whiff.schema_version()
-      "whiff/1"
-
       iex> {:ok, report} = Whiff.extract("test/fixtures/hello.txt", hashes: :none)
-      iex> report["whiff"]["schema"]
-      "whiff/1"
+      iex> {report["whiff"]["schema"], report["identification"]["format"]}
+      {"whiff/1", "text"}
   """
 
   alias Whiff.{Error, Input, Limiter, Native, Options, Registry, Report, Scratch}
 
+  @version Mix.Project.config()[:version]
+  @default_batch_timeout 300_000
+
   @typedoc """
-  A decoded `whiff/1` report: string keys only.
+  A decoded `whiff/1` report. Keys are strings at every level.
 
   ## Example
 
-      %{"whiff" => %{"schema" => "whiff/1"}, "identification" => %{"format" => "text"}}
+      %{
+        "whiff" => %{"schema" => "whiff/1", "version" => "0.8.0", "profile" => "standard"},
+        "identification" => %{"format" => "text", "mime" => "text/plain", "extractor" => "text.plain"},
+        "diagnostics" => %{"extractors" => [%{"id" => "text.plain", "status" => "ok"}], "truncated" => false}
+      }
   """
   @type report :: %{optional(String.t()) => term()}
 
   @typedoc """
-  Public result tuple for non-bang extract/LLM APIs.
+  Result of a non-bang extract or LLM call.
 
-  ## Example
+  ## Examples
 
       {:ok, %{"whiff" => %{"schema" => "whiff/1"}}}
+      {:error, %Whiff.Error{reason: :enoent, message: "...", path: "missing.pdf", details: %{}}}
   """
   @type result :: {:ok, report()} | {:error, Error.t()}
 
   @doc """
-  Library version string from the application vsn.
-
-  ## Returns
-
-  A semver-like string such as `"0.4.0"`.
+  Version of this package.
 
   ## Examples
 
@@ -53,10 +111,10 @@ defmodule Whiff do
       true
   """
   @spec version() :: String.t()
-  def version, do: project_version()
+  def version, do: @version
 
   @doc """
-  Report schema version (`"whiff/1"`).
+  Report schema identifier written to `report["whiff"]["schema"]`.
 
   ## Examples
 
@@ -67,50 +125,52 @@ defmodule Whiff do
   def schema_version, do: Report.schema_version()
 
   @doc """
-  Extract a `whiff/1` report from a filesystem path.
+  Extract a `whiff/1` report from a file path.
 
   ## Arguments
 
-  * `path` — UTF-8 filesystem path
-  * `opts` — optional keywords (see below)
-
-  ## Options
-
-  Native:
-
-  * `:profile` — extraction profile atom (for example `:standard`, `:minimal`)
-  * `:hashes` — hash selection (for example `:none`, `:all`)
-  * `:privacy` — `:strict` (default) or `:off` (also used for Elixir patches)
-  * `:only` / `:skip` — section filters
-  * `:format` / `:provenance` / `:limits` — forwarded to the native engine
-  * `:tokens` — LLM token budget (`llm/2` only)
-
-  Pipeline:
-
-  * `:mode` — `:fallback` | `:augment` | `:override` (merge strategy)
-  * `:extractors` / `:analyzers` — module lists (override app config)
-  * `:strict` — when `true`, plugin errors fail the call
-  * `:plugin_timeout_ms` — per-plugin task timeout
-  * `:override_fields` — paths allowed under `:override`
-
-  Staging:
-
-  * `:stage` — `:never` (default) or `:local`. When `:local`, the file is copied
-    to the configured scratch directory before the DirtyCpu NIF opens it.
+  * `path` — file path as a binary. Any bytes are accepted on Unix; Windows
+    paths must be valid UTF-8.
+  * `opts` — native options, plugin options (see the moduledoc), and:
+    * `:stage` — `:never` (default) or `:local`. `:local` copies the file into
+      a private directory under `config :whiff, :scratch_dir` before the NIF
+      opens it, which keeps slow network reads off DirtyCpu threads. The
+      report still describes the original file: `source.path` and
+      filesystem fields are rewritten from the original (times at second
+      precision), and a `diagnostics.warnings` entry says which fields were
+      omitted.
 
   ## Returns
 
-  * `{:ok, report}` — string-keyed `whiff/1` map
-  * `{:error, %Whiff.Error{}}` — see `t:Whiff.Error.reason/0` (`:enoent`,
-    `:invalid_option`, `:native_error`, plugin errors when `strict: true`, etc.)
-
-  Does not raise; use `extract!/2` for that.
+  * `{:ok, report}`. Extractor problems inside a readable file are reported
+    in `report["diagnostics"]`, not as errors.
+  * `{:error, %Whiff.Error{}}` with reason:
+    * `:enoent`, `:eacces` — the path cannot be inspected
+    * `:invalid_option` — unknown or invalid option, or `stage: :local` over
+      `:scratch_max_bytes`
+    * `:unsupported_input` — `path` is not a binary, is empty, or contains NUL
+    * `:native_error` — other IO failure or a caught native panic
+    * `:overloaded` — no native slot within `config :whiff, :native_wait_ms`
+    * `:extractor_error`, `:analyzer_error`, `:timeout`, `:conflict`,
+      `:invalid_report` — plugin failure, only with `strict: true`
 
   ## Examples
 
       iex> {:ok, report} = Whiff.extract("test/fixtures/hello.txt", hashes: :none)
-      iex> is_binary(report["identification"]["format"])
-      true
+      iex> report["source"]["name"]
+      "hello.txt"
+
+      iex> {:error, err} = Whiff.extract("test/fixtures/missing.txt")
+      iex> {err.reason, err.path}
+      {:enoent, "test/fixtures/missing.txt"}
+
+      iex> {:error, err} = Whiff.extract("test/fixtures/hello.txt", profile: :turbo)
+      iex> {err.reason, err.message}
+      {:invalid_option, "profile must be one of [:minimal, :standard, :full, :llm], got: :turbo"}
+
+      iex> {:error, err} = Whiff.extract("test/fixtures/hello.txt", tokens: 10)
+      iex> err.message
+      "unknown option(s): [:tokens]"
 
       iex> Whiff.extract(123)
       {:error, %Whiff.Error{reason: :unsupported_input, message: "path must be a binary", path: nil, details: %{}}}
@@ -118,79 +178,55 @@ defmodule Whiff do
   @spec extract(Path.t(), keyword()) :: result()
   def extract(path, opts \\ [])
 
-  def extract(path, opts) when is_binary(path) and is_list(opts) do
-    with {:ok, options} <- Options.validate(opts),
-         {:ok, stage_tag} <- Scratch.stage(path, options) do
-      staged_path = Scratch.path(path, stage_tag)
-
-      try do
-        input = Input.from_path(path)
-
-        with {:ok, report} <- native_extract_path(staged_path, options) do
-          Registry.run(input, report, options)
-        end
-      after
-        Scratch.cleanup(stage_tag)
-      end
-    end
+  def extract(path, opts) when is_binary(path) do
+    with {:ok, options} <- Options.validate(opts, :extract), do: do_extract(path, options)
   end
 
-  def extract(_, _) do
-    {:error, Error.new(:unsupported_input, "path must be a binary")}
-  end
+  def extract(_path, _opts), do: {:error, Error.new(:unsupported_input, "path must be a binary")}
 
   @doc """
   Same as `extract/2`, but returns the report or raises `%Whiff.Error{}`.
 
-  ## Arguments
-
-  * `path` — UTF-8 filesystem path
-  * `opts` — same as `extract/2`
-
-  ## Returns
-
-  A string-keyed report map.
-
-  ## Raises
-
-  `%Whiff.Error{}` when `extract/2` would return `{:error, err}`.
-
   ## Examples
 
-      iex> report = Whiff.extract!("test/fixtures/hello.txt", hashes: :none)
-      iex> report["whiff"]["schema"]
+      iex> Whiff.extract!("test/fixtures/hello.txt", hashes: :none)["whiff"]["schema"]
       "whiff/1"
+
+      iex> Whiff.extract!("test/fixtures/missing.txt")
+      ** (Whiff.Error) enoent: test/fixtures/missing.txt: No such file or directory (os error 2) (path: test/fixtures/missing.txt)
   """
   @spec extract!(Path.t(), keyword()) :: report()
-  def extract!(path, opts \\ []) do
-    case extract(path, opts) do
-      {:ok, report} -> report
-      {:error, %Error{} = err} -> raise err
-    end
-  end
+  def extract!(path, opts \\ []), do: unwrap!(extract(path, opts))
 
   @doc """
-  Extract a `whiff/1` report from in-memory bytes.
+  Extract a `whiff/1` report from bytes in memory.
 
   ## Arguments
 
-  * `bytes` — binary payload
-  * `opts` — same as `extract/2`, plus:
-    * `:name` / `:filename` — basename for detection (recommended)
-    * `:mime` — optional MIME hint for `Whiff.Input`
+  * `bytes` — the payload
+  * `opts` — native options, plugin options (see the moduledoc), and:
+    * `:name` or `:filename` (not both) — file name used for detection and
+      `source.name`, for example `"invoice.pdf"`. Default: none (detection
+      by content only; `Whiff.Input` uses `"input.bin"`).
+    * `:mime` — MIME hint passed to plugins in `Whiff.Input`
 
   ## Returns
 
-  * `{:ok, report}` — string-keyed map
-  * `{:error, %Whiff.Error{}}` — `:unsupported_input`, `:invalid_option`,
-    native failures, or strict plugin failures
+  * `{:ok, report}`
+  * `{:error, %Whiff.Error{}}` — `:unsupported_input` when `bytes` is not a
+    binary, `:invalid_option`, `:overloaded`, `:native_error`, or a plugin
+    failure with `strict: true`
 
   ## Examples
 
       iex> bytes = File.read!("test/fixtures/hello.txt")
       iex> {:ok, report} = Whiff.extract_binary(bytes, name: "hello.txt", hashes: :none)
-      iex> report["whiff"]["schema"]
-      "whiff/1"
+      iex> report["source"]["name"]
+      "hello.txt"
+
+      iex> {:error, err} = Whiff.extract_binary("x", name: "a.txt", filename: "b.txt")
+      iex> err.message
+      "pass either :name or :filename, not both"
 
       iex> Whiff.extract_binary(123)
       {:error, %Whiff.Error{reason: :unsupported_input, message: "expected a binary", path: nil, details: %{}}}
@@ -198,64 +234,57 @@ defmodule Whiff do
   @spec extract_binary(binary(), keyword()) :: result()
   def extract_binary(bytes, opts \\ [])
 
-  def extract_binary(bytes, opts) when is_binary(bytes) and is_list(opts) do
-    with {:ok, options} <- Options.validate(opts),
-         input <- build_binary_input(bytes, opts),
-         {:ok, input} <- ok_input(input),
-         {:ok, report} <- native_extract_bytes(bytes, input.filename, options) do
+  def extract_binary(bytes, opts) when is_binary(bytes) do
+    with {:ok, options} <- Options.validate(opts, :extract_binary),
+         %Input{} = input <- Input.from_binary(bytes, opts),
+         {:ok, report} <- native_bytes(bytes, Map.get(options, :name, options[:filename]), options) do
       Registry.run(input, report, options)
     end
   end
 
-  def extract_binary(_, _) do
-    {:error, Error.new(:unsupported_input, "expected a binary")}
-  end
+  def extract_binary(_bytes, _opts),
+    do: {:error, Error.new(:unsupported_input, "expected a binary")}
 
   @doc """
   Same as `extract_binary/2`, but returns the report or raises `%Whiff.Error{}`.
 
-  ## Arguments
-
-  * `bytes` — binary payload
-  * `opts` — same as `extract_binary/2`
-
-  ## Raises
-
-  `%Whiff.Error{}` on failure.
-
   ## Examples
 
-      iex> bytes = File.read!("test/fixtures/hello.txt")
-      iex> Whiff.extract_binary!(bytes, name: "hello.txt", hashes: :none)["whiff"]["schema"]
-      "whiff/1"
+      iex> Whiff.extract_binary!("hello\\n", name: "hello.txt", hashes: :none)["source"]["name"]
+      "hello.txt"
+
+      iex> Whiff.extract_binary!("x", nope: 1)
+      ** (Whiff.Error) invalid_option: unknown option(s): [:nope]
   """
   @spec extract_binary!(binary(), keyword()) :: report()
-  def extract_binary!(bytes, opts \\ []) do
-    case extract_binary(bytes, opts) do
-      {:ok, report} -> report
-      {:error, %Error{} = err} -> raise err
-    end
-  end
+  def extract_binary!(bytes, opts \\ []), do: unwrap!(extract_binary(bytes, opts))
 
   @doc """
-  Compact LLM projection for a path (`Report::llm_view` in upstream).
+  Compact projection of a file's report for LLM context (upstream
+  `Report::llm_view`).
+
+  Elixir extractors and analyzers do not run for this function.
 
   ## Arguments
 
-  * `path` — UTF-8 filesystem path
-  * `opts` — native/pipeline options; `:tokens` defaults to `800`. Accepts
-    `stage: :local` like `extract/2`.
+  * `path` — file path as a binary
+  * `opts` — native options (see the moduledoc), `:stage` (as in `extract/2`), and:
+    * `:tokens` — approximate token budget, 1..100_000 (default `800`)
 
   ## Returns
 
-  * `{:ok, compact}` — string-keyed projection map
-  * `{:error, %Whiff.Error{}}` — path/option/native failures
+  * `{:ok, projection}` — string-keyed map
+  * `{:error, %Whiff.Error{}}` — same reasons as `extract/2`, without plugin errors
 
   ## Examples
 
-      iex> {:ok, compact} = Whiff.llm("test/fixtures/hello.txt", tokens: 200, hashes: :none)
-      iex> is_map(compact)
+      iex> {:ok, view} = Whiff.llm("test/fixtures/hello.txt", tokens: 200, hashes: :none)
+      iex> is_map(view)
       true
+
+      iex> {:error, err} = Whiff.llm("test/fixtures/hello.txt", extractors: [])
+      iex> err.message
+      "unknown option(s): [:extractors]"
 
       iex> Whiff.llm(123)
       {:error, %Whiff.Error{reason: :unsupported_input, message: "path must be a binary", path: nil, details: %{}}}
@@ -263,21 +292,23 @@ defmodule Whiff do
   @spec llm(Path.t(), keyword()) :: result()
   def llm(path, opts \\ [])
 
-  def llm(path, opts) when is_binary(path) and is_list(opts) do
-    with {:ok, options} <- Options.validate(opts),
-         {:ok, stage_tag} <- Scratch.stage(path, options) do
-      staged_path = Scratch.path(path, stage_tag)
-
+  def llm(path, opts) when is_binary(path) do
+    with {:ok, options} <- Options.validate(opts, :llm),
+         {:ok, tag} <- Scratch.stage(path, options) do
       try do
         json = Options.to_native_json(options)
-        Limiter.with_native(fn -> call_llm_path(staged_path, json) end)
+
+        case Limiter.with_native(fn -> call_native(:llm_path, [Scratch.path(path, tag), json]) end) do
+          {:ok, view} -> {:ok, view}
+          {:error, err} -> {:error, Scratch.restore_error(with_path(err, path), tag)}
+        end
       after
-        Scratch.cleanup(stage_tag)
+        Scratch.cleanup(tag)
       end
     end
   end
 
-  def llm(_, _), do: {:error, Error.new(:unsupported_input, "path must be a binary")}
+  def llm(_path, _opts), do: {:error, Error.new(:unsupported_input, "path must be a binary")}
 
   @doc """
   Same as `llm/2`, but returns the projection or raises `%Whiff.Error{}`.
@@ -286,150 +317,194 @@ defmodule Whiff do
 
       iex> is_map(Whiff.llm!("test/fixtures/hello.txt", tokens: 200, hashes: :none))
       true
+
+      iex> Whiff.llm!("test/fixtures/hello.txt", tokens: 0)
+      ** (Whiff.Error) invalid_option: tokens must be an integer in 1..100000, got: 0
   """
   @spec llm!(Path.t(), keyword()) :: report()
-  def llm!(path, opts \\ []) do
-    case llm(path, opts) do
-      {:ok, report} -> report
-      {:error, %Error{} = err} -> raise err
-    end
-  end
+  def llm!(path, opts \\ []), do: unwrap!(llm(path, opts))
 
   @doc """
   Extract many paths with bounded concurrency.
 
+  Each path runs in its own unlinked task, so a crash in one path cannot stop
+  the caller or the others.
+
   ## Arguments
 
-  * `paths` — list of UTF-8 path strings
-  * `opts` — forwarded to `extract/2`, plus:
-    * `:max_concurrency` — positive integer (default `4`)
-    * `:on_error` — `:collect` (default) keeps going; `:halt` stops and returns
-      the first error with `:partial` results in `err.details`
+  * `paths` — list of path binaries. A non-binary element yields an
+    `:unsupported_input` result for that element.
+  * `opts` — the options of `extract/2`, plus:
+    * `:max_concurrency` — 1..128 (default `4`). Native calls are also bounded
+      by `config :whiff, :native_max_concurrency`.
+    * `:on_error` — `:collect` (default) returns every result; `:halt` stops
+      at the first error and returns it with `details.partial` holding the
+      `{path, result}` pairs completed before it
+    * `:timeout` — per-path limit in ms, 1..3_600_000, or `:infinity`
+      (default `300_000`). A path that exceeds it is killed and yields
+      `{:error, %Whiff.Error{reason: :timeout}}`. Killing the task does not
+      stop native work already running in the NIF.
 
   ## Returns
 
-  * `{:ok, [{path, result}, ...]}` — one pair per input path, in order
-    (`result` is `t:result/0`)
-  * `{:error, %Whiff.Error{}}` — invalid args, invalid options, or `:halt` stop
+  * `{:ok, [{path, result}]}` — one pair per input, in input order
+  * `{:error, %Whiff.Error{}}` — invalid arguments or options, or the first
+    error with `on_error: :halt`
 
   ## Examples
 
       iex> path = "test/fixtures/hello.txt"
-      iex> {:ok, pairs} = Whiff.extract_many([path], hashes: :none, max_concurrency: 1)
-      iex> match?([{^path, {:ok, _}}], pairs)
-      true
+      iex> {:ok, [{^path, {:ok, report}}]} = Whiff.extract_many([path], hashes: :none, max_concurrency: 1)
+      iex> report["whiff"]["schema"]
+      "whiff/1"
+
+      iex> {:error, err} = Whiff.extract_many(["test/fixtures/hello.txt", "test/fixtures/missing.txt"], on_error: :halt, max_concurrency: 1)
+      iex> {err.reason, length(err.details.partial)}
+      {:enoent, 1}
 
       iex> Whiff.extract_many("nope")
-      {:error, %Whiff.Error{reason: :unsupported_input, message: "paths must be a list of binaries", path: nil, details: %{}}}
+      {:error, %Whiff.Error{reason: :unsupported_input, message: "paths must be a list", path: nil, details: %{}}}
   """
   @spec extract_many([Path.t()], keyword()) ::
           {:ok, [{Path.t(), result()}]} | {:error, Error.t()}
   def extract_many(paths, opts \\ [])
 
-  def extract_many(paths, opts) when is_list(paths) and is_list(opts) do
-    with {:ok, options} <- Options.validate(opts) do
-      max = Map.get(options, :max_concurrency, 4)
-      on_error = Map.get(options, :on_error, :collect)
-      extract_opts = Keyword.drop(opts, [:max_concurrency, :on_error])
-
-      stream =
-        Task.async_stream(
-          paths,
-          fn path -> {path, extract(path, extract_opts)} end,
-          max_concurrency: max,
-          timeout: :infinity,
-          ordered: true
-        )
-
-      reduce_many(stream, on_error)
+  def extract_many(paths, opts) when is_list(paths) do
+    with {:ok, options} <- Options.validate(opts, :extract_many) do
+      with_task_supervisor(&run_batch(&1, paths, options))
     end
   end
 
-  def extract_many(_, _) do
-    {:error, Error.new(:unsupported_input, "paths must be a list of binaries")}
+  def extract_many(_paths, _opts),
+    do: {:error, Error.new(:unsupported_input, "paths must be a list")}
+
+  defp run_batch(sup, paths, options) do
+    timeout = Map.get(options, :timeout, @default_batch_timeout)
+
+    sup
+    |> Task.Supervisor.async_stream_nolink(
+      paths,
+      fn path -> {path, extract_validated(path, options)} end,
+      max_concurrency: Map.get(options, :max_concurrency, 4),
+      timeout: timeout,
+      on_timeout: :kill_task,
+      ordered: true,
+      zip_input_on_exit: true
+    )
+    |> Stream.map(&batch_result(&1, timeout))
+    |> reduce_many(Map.get(options, :on_error, :collect))
   end
 
-  defp reduce_many(stream, :collect) do
-    results =
-      Enum.map(stream, fn
-        {:ok, pair} ->
-          pair
+  defp extract_validated(path, options) when is_binary(path), do: do_extract(path, options)
 
-        {:exit, reason} ->
-          {"", {:error, Error.new(:native_error, "task exited: #{inspect(reason)}")}}
-      end)
+  defp extract_validated(_path, _options),
+    do: {:error, Error.new(:unsupported_input, "path must be a binary")}
 
-    {:ok, results}
+  defp batch_result({:ok, pair}, _timeout), do: pair
+
+  defp batch_result({:exit, {path, :timeout}}, timeout),
+    do:
+      {path,
+       {:error, Error.new(:timeout, "extraction exceeded #{timeout}ms", path: maybe_path(path))}}
+
+  defp batch_result({:exit, {path, reason}}, _timeout) do
+    kind = if is_tuple(reason), do: elem(reason, 0), else: reason
+
+    {path,
+     {:error,
+      Error.new(:native_error, "extraction task exited: #{inspect(kind)}", path: maybe_path(path))}}
   end
+
+  defp maybe_path(path) when is_binary(path), do: path
+  defp maybe_path(_), do: nil
+
+  defp reduce_many(stream, :collect), do: {:ok, Enum.to_list(stream)}
 
   defp reduce_many(stream, :halt) do
     Enum.reduce_while(stream, {:ok, []}, fn
-      {:ok, {path, {:error, %Error{} = err}}}, {:ok, acc} ->
+      {path, {:error, %Error{} = err}}, {:ok, acc} ->
+        partial = Enum.reverse(acc)
+
         {:halt,
          {:error,
           %{
             err
-            | path: err.path || path,
-              details: Map.put(err.details, :partial, Enum.reverse(acc))
+            | path: err.path || maybe_path(path),
+              details: Map.put(err.details, :partial, partial)
           }}}
 
-      {:ok, pair}, {:ok, acc} ->
+      pair, {:ok, acc} ->
         {:cont, {:ok, [pair | acc]}}
-
-      {:exit, reason}, {:ok, _} ->
-        {:halt, {:error, Error.new(:native_error, "task exited: #{inspect(reason)}")}}
     end)
     |> case do
       {:ok, acc} -> {:ok, Enum.reverse(acc)}
-      {:error, _} = err -> err
+      error -> error
     end
   end
 
-  defp native_extract_path(path, options) do
+  defp with_task_supervisor(fun) do
+    case Process.whereis(Whiff.TaskSupervisor) do
+      nil ->
+        # :whiff not started: use a temporary supervisor for this call.
+        {:ok, sup} = Task.Supervisor.start_link()
+
+        try do
+          fun.(sup)
+        after
+          Supervisor.stop(sup)
+        end
+
+      _pid ->
+        fun.(Whiff.TaskSupervisor)
+    end
+  end
+
+  defp do_extract(path, options) do
+    with {:ok, tag} <- Scratch.stage(path, options) do
+      try do
+        json = Options.to_native_json(options)
+        staged = Scratch.path(path, tag)
+
+        case Limiter.with_native(fn -> call_native(:extract_path, [staged, json]) end) do
+          {:ok, report} ->
+            Registry.run(Input.from_path(path), Scratch.restore_report(report, tag), options)
+
+          {:error, err} ->
+            {:error, Scratch.restore_error(with_path(err, staged), tag)}
+        end
+      after
+        Scratch.cleanup(tag)
+      end
+    end
+  end
+
+  defp native_bytes(bytes, name, options) do
     json = Options.to_native_json(options)
-    Limiter.with_native(fn -> call_extract_path(path, json) end)
-  end
 
-  defp native_extract_bytes(bytes, name, options) do
-    json = Options.to_native_json(options)
-    Limiter.with_native(fn -> call_extract_bytes(bytes, name, json) end)
-  end
-
-  defp call_llm_path(path, json) do
-    case Native.llm_path(path, json) do
-      {:ok, bin} -> Report.decode(bin)
-      {:error, reason, message} -> {:error, map_native_error(reason, message, path)}
+    case Limiter.with_native(fn -> call_native(:extract_bytes, [bytes, name, json]) end) do
+      {:ok, report} -> {:ok, report}
+      {:error, err} -> {:error, if(name, do: with_path(err, name), else: err)}
     end
   end
 
-  defp call_extract_path(path, json) do
-    case Native.extract_path(path, json) do
-      {:ok, bin} -> Report.decode(bin)
-      {:error, reason, message} -> {:error, map_native_error(reason, message, path)}
+  # The NIF returns tagged tuples and catches panics. The rescue is a second
+  # line of defense (for example a NIF that failed to load).
+  defp call_native(fun, args) do
+    case apply(Native, fun, args) do
+      {:ok, json} ->
+        Report.decode(json)
+
+      {:error, reason, message} when is_atom(reason) and is_binary(message) ->
+        {:error, Error.new(reason, message)}
     end
-  end
-
-  defp call_extract_bytes(bytes, name, json) do
-    case Native.extract_bytes(bytes, name, json) do
-      {:ok, bin} -> Report.decode(bin)
-      {:error, reason, message} -> {:error, map_native_error(reason, message, name)}
-    end
-  end
-
-  defp map_native_error(reason, message, path) when is_atom(reason) do
-    Error.new(reason, to_string(message), path: path)
-  end
-
-  defp build_binary_input(bytes, opts) do
-    Input.from_binary(bytes, opts)
-  end
-
-  defp ok_input(%Input{} = input), do: {:ok, input}
-  defp ok_input({:error, _} = err), do: err
-
-  defp project_version do
-    Application.spec(:whiff, :vsn) |> to_string()
   rescue
-    _ -> "0.4.0"
+    e in [ErlangError, ArgumentError, UndefinedFunctionError] ->
+      {:error, Error.new(:native_error, "native call failed: #{inspect(e.__struct__)}")}
   end
+
+  defp with_path(%Error{path: nil} = err, path), do: %{err | path: path}
+  defp with_path(err, _path), do: err
+
+  defp unwrap!({:ok, value}), do: value
+  defp unwrap!({:error, %Error{} = err}), do: raise(err)
 end
