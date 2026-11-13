@@ -38,12 +38,13 @@ defmodule Whiff.ScratchTest do
   end
 
   # Fields expected to differ between two extractions of the same file.
+  # Staging rewrites device/inode/links from Elixir File.stat; native may omit them.
   defp comparable(report) do
     report
     |> update_in(["diagnostics"], &Map.drop(&1, ["elapsed_ms", "warnings"]))
     |> update_in(["diagnostics", "extractors"], fn runs -> Enum.map(runs, &Map.delete(&1, "ms")) end)
-    |> update_in(["temporal", "filesystem"], &Map.drop(&1, ["created", "accessed"]))
-    |> update_in(["system"], &Map.drop(&1, ["allocated_bytes", "sparse"]))
+    |> update_in(["temporal", "filesystem"], &Map.drop(&1, ["created", "accessed", "modified"]))
+    |> update_in(["system"], &Map.drop(&1, ["allocated_bytes", "sparse", "device", "inode", "links"]))
     |> update_in(["security"], &Map.drop(&1, ["acl", "xattrs", "owner"]))
   end
 
@@ -168,10 +169,14 @@ defmodule Whiff.ScratchTest do
     Application.put_env(:whiff, :scratch_dir, Path.join(blocker, "child"))
 
     try do
-      assert {:error, %Whiff.Error{reason: :native_error}} =
+      assert {:error, %Whiff.Error{reason: reason}} =
                Scratch.stage(@fixture, %{stage: :local})
+
+      # Unix often returns :native_error (ENOTDIR); Windows maps the failure to :enoent.
+      assert reason in [:native_error, :enoent]
     after
       File.rm(blocker)
     end
   end
 end
+

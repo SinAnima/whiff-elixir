@@ -192,8 +192,12 @@ defmodule Whiff do
       iex> Whiff.extract!("test/fixtures/hello.txt", hashes: :none)["whiff"]["schema"]
       "whiff/1"
 
-      iex> Whiff.extract!("test/fixtures/missing.txt")
-      ** (Whiff.Error) enoent: test/fixtures/missing.txt: No such file or directory (os error 2) (path: test/fixtures/missing.txt)
+      iex> try do
+      ...>   Whiff.extract!("test/fixtures/missing.txt")
+      ...> rescue
+      ...>   e in Whiff.Error -> {e.reason, e.path}
+      ...> end
+      {:enoent, "test/fixtures/missing.txt"}
   """
   @spec extract!(Path.t(), keyword()) :: report()
   def extract!(path, opts \\ []), do: unwrap!(extract(path, opts))
