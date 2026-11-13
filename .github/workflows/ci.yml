@@ -14,6 +14,10 @@ jobs:
           - os: ubuntu-22.04
             elixir: "1.18"
             otp: "27"
+          # Oldest supported OTP.
+          - os: ubuntu-22.04
+            elixir: "1.18"
+            otp: "26"
           # macos-14 stopped getting runners (job cancelled with empty steps);
           # align with Release, which builds NIFs on macos-15.
           - os: macos-15
@@ -44,7 +48,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             native/whiff_native/target
-          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}-${{ hashFiles('native/whiff_native/Cargo.lock') }}
+          key: ${{ runner.os }}-otp${{ matrix.otp }}-mix-${{ hashFiles('mix.lock') }}-${{ hashFiles('native/whiff_native/Cargo.lock') }}
 
       - run: mix deps.get
       - run: mix format --check-formatted
@@ -60,15 +64,32 @@ jobs:
         env:
           WHIFF_BUILD: "1"
 
-      - name: Native fmt/clippy
-        if: runner.os == 'Linux'
+      - name: Docs
+        if: matrix.otp == '27'
+        run: mix docs --warnings-as-errors
+
+      - name: Dependency audit
+        if: runner.os == 'Linux' && matrix.otp == '27'
+        run: |
+          mix hex.audit
+          mix deps.unlock --check-unused
+
+      - name: Native fmt/clippy/test
+        if: runner.os == 'Linux' && matrix.otp == '27'
         working-directory: native/whiff_native
         run: |
           cargo fmt --check
-          cargo clippy -- -D warnings
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+
+      - name: Example package
+        if: runner.os == 'Linux' && matrix.otp == '27'
+        working-directory: examples/trade_whiffer
+        run: |
+          mix deps.get
+          mix test
 
   best-effort-windows:
-    if: github.event_name == 'push'
     runs-on: windows-2022
     continue-on-error: true
     steps:
